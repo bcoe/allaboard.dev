@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-Allaboard is a climbing community platform for logging sessions, sharing climbs, and tracking stats. It's a Next.js frontend backed by an Express.js API and PostgreSQL database.
+Allaboard is a climbing community platform for logging sessions, sharing climbs, and tracking stats. It's a Next.js 16 App Router app with Route Handlers for the API, backed by PostgreSQL.
 
-**Auth:** Google OAuth (MVP). The `alex_sends` hardcoded user is a legacy placeholder — replace with session-based current user as auth is wired up.
+**Auth:** Google OAuth (MVP) via `iron-session` (encrypted cookie, no DB lookup per request).
 
 ---
 
@@ -35,6 +35,7 @@ Allaboard is a climbing community platform for logging sessions, sharing climbs,
 │       ├── auth-context.tsx # AuthProvider + useAuth hook
 │       ├── server/
 │       │   ├── db.ts       # Knex instance (server-only, never imported by client)
+│       │   ├── session.ts  # iron-session config + SessionData interface
 │       │   └── stats.ts    # computeStats logic
 │       └── db/
 │           ├── index.ts    # Re-exports from ./remote
@@ -93,8 +94,9 @@ Migration files go in `api/migrations/` and are named `YYYYMMDDHHMMSS_descriptio
 5. `20260314000005_create_log_entries` — log_entries table
 6. `20260328000001_add_auth_fields_to_users` — adds `email`, `profile_picture_url` to users
 7. `20260328000002_create_oauth_accounts` — Google OAuth identity → user link
-8. `20260328000003_create_auth_sessions` — web login sessions (HttpOnly cookie)
+8. `20260328000003_create_auth_sessions` — DB sessions table (kept for schema completeness; not used — iron-session stores session in cookie)
 9. `20260328000004_add_picture_to_oauth_accounts` — adds `profile_picture_url` to oauth_accounts (available before users row exists)
+10. `20260328000005_create_boards` — boards table; seeded with Kilter Board (Original), Moonboard 2016, Tension Board 1 (TB1)
 
 ---
 
@@ -103,18 +105,27 @@ Migration files go in `api/migrations/` and are named `YYYYMMDDHHMMSS_descriptio
 ### `users`
 | Column | Type | Notes |
 |--------|------|-------|
-| id | text | primary key (handle-based) |
-| handle | text | unique |
+| id | text | primary key (= handle) |
+| handle | text | unique; derived from display_name via `toHandle()` |
 | display_name | text | |
 | avatar_color | text | Tailwind color class |
 | bio | text | |
-| home_board | text | Kilter / Moonboard |
+| home_board | text | board name (e.g. "Kilter Board (Original)") |
 | home_board_angle | integer | |
+| email | text | from Google |
+| profile_picture_url | text | Google account photo |
 | joined_at | timestamp | |
 | followers_count | integer | |
 | following_count | integer | |
 | personal_best_kilter | text | grade string |
 | personal_best_moonboard | text | grade string |
+
+### `boards`
+| Column | Type | Notes |
+|--------|------|-------|
+| id | UUID | primary key |
+| name | text | unique; e.g. "Kilter Board (Original)" |
+| created_at | timestamp | |
 
 ### `climbs`
 | Column | Type | Notes |
@@ -171,78 +182,54 @@ Migration files go in `api/migrations/` and are named `YYYYMMDDHHMMSS_descriptio
 ### Provider
 Google OAuth 2.0 only (MVP). Uses Google Cloud Web Application credentials.
 
-### Session cookie
-- Name: `allaboard_session` (suggested)
-- HttpOnly, Secure, SameSite=Lax
-- Value: `auth_sessions.session_token` (UUID or random token)
-- Expiry: 30 days (rolling or fixed — TBD)
+### Session: iron-session (encrypted cookie)
+- Cookie name: `allaboard_session`; HttpOnly, Secure in production, SameSite=Lax, 30-day max-age
+- Payload: `{ oauthAccountId?: string; userId?: string }` (stored encrypted — no DB lookup per request)
+- Config: `src/lib/server/session.ts` — reads `SESSION_SECRET` env var (must be 32+ chars)
+- `userId` is absent/undefined until onboarding completes; `oauthAccountId` is set after Google callback
 
 ### Auth flow
 
 ```
 1. User clicks "Login with Google"
-2. Redirect to Google OAuth consent screen
-3. Google redirects back to /api/auth/callback?code=...
-4. API exchanges code for tokens, decodes ID token to get:
-     sub (provider_user_id), email, picture
-5a. Existing user (oauth_accounts row with user_id set):
-     → Create auth_sessions row, set cookie, redirect to /
-5b. New Google account (no oauth_accounts row):
-     → Create oauth_accounts row (user_id = null)
-     → Create auth_sessions row (user_id = null)
-     → Set cookie, redirect to /onboarding
-5c. Returning user mid-onboarding (oauth_accounts.user_id = null):
-     → Same as 5b redirect to /onboarding
-6. Onboarding: user picks a unique handle
-     → Create users row, set oauth_accounts.user_id, set auth_sessions.user_id
+2. GET /api/auth/google → generates random state, stores in oauth_state cookie, redirects to Google
+3. Google redirects to GET /api/auth/callback?code=...&state=...
+4. Verifies state cookie (CSRF), exchanges code for tokens, fetches userinfo from Google
+5a. Existing user (oauth_accounts.user_id is set):
+     → session.oauthAccountId = ..., session.userId = handle → redirect to /
+5b. New Google account (no oauth_accounts row or user_id = null):
+     → Upsert oauth_accounts, session.oauthAccountId = ..., session.userId = undefined → redirect to /onboarding
+6. Onboarding: user enters display name (handle derived via toHandle()):
+     → POST /api/onboarding → creates users row, links oauth_accounts.user_id, session.userId = handle
      → Redirect to /
-7. Logout: DELETE auth_sessions row, clear cookie
+7. Logout: POST /api/auth/logout → session.destroy()
 ```
 
-### Resolving the current user on the API
+### Resolving the current user in a route handler
 ```typescript
-// Pseudo-code for any authenticated route
-const token = req.cookies.allaboard_session;
-const session = await db("auth_sessions")
-  .where({ session_token: token })
-  .where("expires_at", ">", new Date())
-  .first();
-if (!session) return res.status(401).json({ error: "Unauthenticated" });
-// session.user_id is null → onboarding incomplete
-// session.user_id is set → fully authenticated user
+import { getIronSession } from "iron-session";
+import { cookies } from "next/headers";
+import { sessionOptions, type SessionData } from "@/lib/server/session";
+
+const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+if (!session.userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+// session.userId is the user's handle (= users.id)
 ```
 
-### Auth tables
-
-#### `oauth_accounts`
+### `oauth_accounts` table
 | Column | Type | Notes |
 |--------|------|-------|
 | id | UUID | primary key |
 | provider | text | `'google'` |
 | provider_user_id | text | Google `sub` claim; unique per provider |
 | email | text | from Google ID token |
+| profile_picture_url | text | nullable |
 | user_id | text | FK → users.id, **null until onboarding complete** |
-| access_token | text | nullable; encrypt at rest in production |
-| refresh_token | text | nullable; encrypt at rest in production |
+| access_token | text | nullable |
+| refresh_token | text | nullable |
 | token_expires_at | timestamp | nullable |
 | created_at | timestamp | |
 | updated_at | timestamp | |
-
-#### `auth_sessions`
-| Column | Type | Notes |
-|--------|------|-------|
-| id | UUID | primary key |
-| session_token | text | unique; stored in HttpOnly cookie |
-| oauth_account_id | UUID | FK → oauth_accounts.id (CASCADE delete) |
-| user_id | text | FK → users.id, **null until onboarding complete** |
-| expires_at | timestamp | |
-| created_at | timestamp | |
-
-#### Users table additions (migration 6)
-| Column | Type | Notes |
-|--------|------|-------|
-| email | text | nullable; from Google |
-| profile_picture_url | text | nullable; Google account photo URL |
 
 ### Unauthenticated access rules
 - Activity feed: visible (but cannot filter to "following" only)
@@ -277,6 +264,9 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | POST | `/api/auth/logout` | `src/app/api/auth/logout/route.ts` |
 | GET | `/api/auth/google` | `src/app/api/auth/google/route.ts` |
 | GET | `/api/auth/callback` | `src/app/api/auth/callback/route.ts` |
+| GET | `/api/boards` | `src/app/api/boards/route.ts` |
+| GET | `/api/users/check-handle?handle=` | `src/app/api/users/check-handle/route.ts` |
+| POST | `/api/onboarding` | `src/app/api/onboarding/route.ts` |
 
 ---
 
@@ -290,6 +280,7 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | `/climbs/new` | `src/app/climbs/new/page.tsx` | Submit new climb |
 | `/profile` | `src/app/profile/page.tsx` | Current user profile |
 | `/stats` | `src/app/stats/page.tsx` | Stats dashboard |
+| `/onboarding` | `src/app/onboarding/page.tsx` | First-time setup after Google OAuth (display name, home board, max grade) |
 
 ---
 
@@ -396,6 +387,9 @@ This runs Knex migrations against the production database **before** building Ne
 |----------|--------|-------------|
 | `DATABASE_URL_UNPOOLED` | Neon integration (auto) | Direct Neon connection — used by migrations and route handlers |
 | `DATABASE_URL` | Neon integration (auto) | Pooled Neon connection — fallback if above absent |
+| `GOOGLE_CLIENT_ID` | Manual | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Manual | Google OAuth client secret |
+| `SESSION_SECRET` | Manual | iron-session key; generate: `openssl rand -hex 32` |
 
 The Neon Vercel integration sets `DATABASE_URL` and `DATABASE_URL_UNPOOLED` automatically when you connect a Neon project in the Vercel dashboard.
 
@@ -421,9 +415,13 @@ Next.js automatically loads these files (in priority order, highest last):
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | local postgres | Full postgres connection string |
-| `PGUSER` | `$USER` | Postgres user for local dev |
-| `PORT` | `3001` | API server port |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | API base URL for frontend |
+| Variable | Where | Description |
+|----------|-------|-------------|
+| `GOOGLE_CLIENT_ID` | `.env` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | `.env` | Google OAuth client secret |
+| `SESSION_SECRET` | `.env.local` / Vercel | iron-session encryption key; **must be 32+ chars**. Generate: `openssl rand -hex 32` |
+| `DATABASE_URL_UNPOOLED` | Vercel (Neon auto) | Direct Neon connection — used for migrations and route handlers |
+| `DATABASE_URL` | Vercel (Neon auto) | Pooled Neon connection — fallback if above absent |
+| `PGUSER` | `.env.local` | Postgres user for local dev (only if differs from OS user) |
+
+`SESSION_SECRET` must also be added to Vercel Project → Settings → Environment Variables.

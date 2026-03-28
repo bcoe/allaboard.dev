@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomBytes } from "crypto";
+import { getIronSession } from "iron-session";
+import { cookies } from "next/headers";
 import db from "@/lib/server/db";
+import { sessionOptions, type SessionData } from "@/lib/server/session";
 
 export async function GET(req: NextRequest) {
   const { origin, searchParams } = new URL(req.url);
@@ -36,7 +38,7 @@ export async function GET(req: NextRequest) {
     expires_in: number;
   };
 
-  // Fetch the Google profile (sub, email, name, picture)
+  // Fetch Google profile (sub, email, name, picture)
   const profileRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
     headers: { Authorization: `Bearer ${access_token}` },
   });
@@ -45,16 +47,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/?auth_error=profile_fetch`);
   }
 
-  const { sub, email, name, picture } = await profileRes.json() as {
+  const { sub, email, picture } = await profileRes.json() as {
     sub: string;
     email: string;
-    name: string;
     picture: string;
   };
 
   const tokenExpiresAt = new Date(Date.now() + expires_in * 1000);
 
-  // Upsert oauth_accounts row
+  // Upsert oauth_accounts
   let oauthAccount = await db("oauth_accounts")
     .where({ provider: "google", provider_user_id: sub })
     .first();
@@ -62,58 +63,44 @@ export async function GET(req: NextRequest) {
   if (!oauthAccount) {
     [oauthAccount] = await db("oauth_accounts")
       .insert({
-        provider:             "google",
-        provider_user_id:     sub,
+        provider:            "google",
+        provider_user_id:    sub,
         email,
-        profile_picture_url:  picture,
+        profile_picture_url: picture,
         access_token,
-        refresh_token:        refresh_token ?? null,
-        token_expires_at:     tokenExpiresAt,
-        updated_at:           new Date(),
+        refresh_token:       refresh_token ?? null,
+        token_expires_at:    tokenExpiresAt,
+        updated_at:          new Date(),
       })
       .returning("*");
   } else {
     await db("oauth_accounts").where({ id: oauthAccount.id }).update({
       email,
-      profile_picture_url:  picture,
+      profile_picture_url: picture,
       access_token,
-      refresh_token:        refresh_token ?? oauthAccount.refresh_token,
-      token_expires_at:     tokenExpiresAt,
-      updated_at:           new Date(),
+      refresh_token:       refresh_token ?? oauthAccount.refresh_token,
+      token_expires_at:    tokenExpiresAt,
+      updated_at:          new Date(),
     });
     oauthAccount = await db("oauth_accounts").where({ id: oauthAccount.id }).first();
   }
 
-  // Keep the users row's profile picture in sync with Google
+  // Keep users.profile_picture_url in sync on every login
   if (oauthAccount.user_id) {
     await db("users").where({ id: oauthAccount.user_id }).update({
       profile_picture_url: picture,
     });
   }
 
-  // Create a 30-day session
-  const sessionToken = randomBytes(32).toString("hex");
-  const expiresAt    = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  // Write iron-session cookie
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+  session.oauthAccountId = oauthAccount.id;
+  session.userId         = oauthAccount.user_id ?? undefined;
+  await session.save();
 
-  await db("auth_sessions").insert({
-    session_token:     sessionToken,
-    oauth_account_id:  oauthAccount.id,
-    user_id:           oauthAccount.user_id ?? null,
-    expires_at:        expiresAt,
-  });
-
+  // Clear the CSRF state cookie and redirect
   const destination = oauthAccount.user_id ? "/" : "/onboarding";
   const response = NextResponse.redirect(`${origin}${destination}`);
-
-  response.cookies.set("allaboard_session", sessionToken, {
-    httpOnly: true,
-    secure:   process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    expires:  expiresAt,
-    path:     "/",
-  });
-
   response.cookies.delete("oauth_state");
-
   return response;
 }
