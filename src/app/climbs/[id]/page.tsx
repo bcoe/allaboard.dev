@@ -83,7 +83,7 @@ export default function ClimbPage() {
         </div>
 
         <div className="mt-2">
-          <h1 className="text-3xl font-bold text-black mb-3">{climb.name}</h1>
+          <h1 className="text-3xl font-bold text-orange-400 mb-3">{climb.name}</h1>
 
           {/* Grade + metadata */}
           <div className="flex items-center gap-2 flex-wrap mb-3">

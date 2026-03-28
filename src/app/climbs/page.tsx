@@ -34,10 +34,12 @@ export default function ClimbsPage() {
   const [sort, setSort]         = useState("sends_desc");
 
   // Dropdown open state
+  const [sortOpen, setSortOpen]   = useState(false);
   const [gradeOpen, setGradeOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [angleOpen, setAngleOpen] = useState(false);
 
+  const sortRef  = useRef<HTMLDivElement>(null);
   const gradeRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const angleRef = useRef<HTMLDivElement>(null);
@@ -115,6 +117,7 @@ export default function ClimbsPage() {
   // Close dropdowns on outside click
   useEffect(() => {
     function onMouseDown(e: MouseEvent) {
+      if (sortRef.current  && !sortRef.current.contains(e.target as Node))  setSortOpen(false);
       if (gradeRef.current && !gradeRef.current.contains(e.target as Node)) setGradeOpen(false);
       if (boardRef.current && !boardRef.current.contains(e.target as Node)) setBoardOpen(false);
       if (angleRef.current && !angleRef.current.contains(e.target as Node)) setAngleOpen(false);
@@ -202,17 +205,49 @@ export default function ClimbsPage() {
       <div className="flex flex-wrap gap-2 mb-6">
 
         {/* Sort selector */}
-        <select
-          value={sort}
-          onChange={(e) => setSort(e.target.value)}
-          className="bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-stone-300 text-sm font-medium focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
-        >
-          <option value="sends_desc">Most Repeats</option>
-          <option value="star_rating_desc">Top Rated</option>
-          <option value="grade_desc">Hardest First</option>
-          <option value="grade_asc">Easiest First</option>
-          <option value="has_video">Has Video</option>
-        </select>
+        <div className="relative" ref={sortRef}>
+          <button
+            onClick={() => { setSortOpen((o) => !o); setGradeOpen(false); setBoardOpen(false); setAngleOpen(false); }}
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors whitespace-nowrap bg-stone-800 border-stone-700 text-stone-300 hover:border-stone-500"
+          >
+            <span className="text-stone-500 font-normal">Sort:</span>
+            {{
+              sends_desc:       "Most Repeats",
+              star_rating_desc: "Top Rated",
+              grade_desc:       "Hardest First",
+              grade_asc:        "Easiest First",
+              has_video:        "Has Video",
+            }[sort]}
+            <svg className="w-3.5 h-3.5 opacity-70" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path d="m6 9 6 6 6-6"/>
+            </svg>
+          </button>
+
+          {sortOpen && (
+            <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 z-30 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl p-2 min-w-[170px]">
+              <div className="px-2 pt-1 pb-2">
+                <span className="text-white text-sm font-semibold">Sort by</span>
+              </div>
+              {([
+                { value: "sends_desc",      label: "Most Repeats" },
+                { value: "star_rating_desc", label: "Top Rated" },
+                { value: "grade_desc",       label: "Hardest First" },
+                { value: "grade_asc",        label: "Easiest First" },
+                { value: "has_video",        label: "Has Video" },
+              ] as const).map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => { setSort(value); setSortOpen(false); }}
+                  className={`w-full px-2 py-2.5 rounded-lg text-sm transition-colors text-left ${
+                    sort === value ? "bg-stone-800 text-orange-400 font-medium" : "text-stone-300 hover:bg-stone-800"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Search bar */}
         <div className="relative flex-1 min-w-48">
@@ -242,7 +277,7 @@ export default function ClimbsPage() {
         {/* Grade filter */}
         <div className="relative" ref={gradeRef}>
           <button
-            onClick={() => { setGradeOpen((o) => !o); setBoardOpen(false); setAngleOpen(false); }}
+            onClick={() => { setGradeOpen((o) => !o); setBoardOpen(false); setAngleOpen(false); setSortOpen(false); }}
             className={`flex items-center gap-1.5 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors whitespace-nowrap ${
               hasGradeFilter
                 ? "bg-orange-500 border-orange-500 text-white"
@@ -256,7 +291,7 @@ export default function ClimbsPage() {
           </button>
 
           {gradeOpen && (
-            <div className="absolute right-0 top-full mt-2 z-30 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl p-4 w-72">
+            <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 z-30 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl p-4 w-72 max-w-[calc(100vw-2rem)]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-white text-sm font-semibold">Grade Range</span>
                 {hasGradeFilter && (
@@ -301,7 +336,7 @@ export default function ClimbsPage() {
         {/* Angle filter */}
         <div className="relative" ref={angleRef}>
           <button
-            onClick={() => { setAngleOpen((o) => !o); setGradeOpen(false); setBoardOpen(false); }}
+            onClick={() => { setAngleOpen((o) => !o); setGradeOpen(false); setBoardOpen(false); setSortOpen(false); }}
             className={`flex items-center gap-1.5 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors whitespace-nowrap ${
               hasAngleFilter
                 ? "bg-orange-500 border-orange-500 text-white"
@@ -315,7 +350,7 @@ export default function ClimbsPage() {
           </button>
 
           {angleOpen && (
-            <div className="absolute right-0 top-full mt-2 z-30 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl p-4 w-56">
+            <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 z-30 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl p-4 w-56">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-white text-sm font-semibold">Angle (degrees)</span>
                 {hasAngleFilter && (
@@ -353,7 +388,7 @@ export default function ClimbsPage() {
         {/* Board filter */}
         <div className="relative" ref={boardRef}>
           <button
-            onClick={() => { setBoardOpen((o) => !o); setGradeOpen(false); setAngleOpen(false); }}
+            onClick={() => { setBoardOpen((o) => !o); setGradeOpen(false); setAngleOpen(false); setSortOpen(false); }}
             className={`flex items-center gap-1.5 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors whitespace-nowrap ${
               hasBoardFilter
                 ? "bg-orange-500 border-orange-500 text-white"
