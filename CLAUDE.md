@@ -242,6 +242,48 @@ if (!session.userId) return NextResponse.json({ error: "Unauthenticated" }, { st
 
 ---
 
+## Access Control (ACL)
+
+### Core rule
+All resources (climbs, sessions, log entries, profiles) are **publicly viewable** across allaboard.dev. A resource is a **protected resource** when it has an owner — identified by the `users.id` (handle) of the user who created it.
+
+**Only the owning user may edit or delete their own protected resources.**
+
+### What "owner" means per resource type
+| Resource | Owner column |
+|----------|-------------|
+| `climbs` | `climbs.author` |
+| `sessions` | `sessions.user_id` |
+| `log_entries` | `log_entries.user_id` |
+| `users` (profile) | `users.id` itself |
+
+### Enforcement rules
+
+**API route handlers (PATCH / PUT / DELETE):**
+- Read `session.userId` from iron-session.
+- Compare against the resource's owner column.
+- Return **403** if `session.userId !== resource.owner`. Return **401** if not logged in at all.
+- Never trust an owner value sent from the client — always derive it server-side from the session.
+
+**Frontend / UI:**
+- Edit/delete controls (buttons, forms, menus) are only rendered when `useAuth().user?.id === resource.ownerId`.
+- Pages are still rendered and all data is shown to every visitor — only the edit/delete affordances are hidden.
+
+### Pattern for a protected mutation handler
+```typescript
+const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+if (!session.userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+
+const resource = await db("table").where({ id }).first();
+if (!resource) return NextResponse.json({ error: "Not found" }, { status: 404 });
+if (resource.owner_column !== session.userId)
+  return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+// safe to mutate
+```
+
+---
+
 ## API Endpoints
 
 All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev server and Vercel in production.
