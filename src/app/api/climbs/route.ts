@@ -38,13 +38,43 @@ export async function GET(req: NextRequest) {
     const boardId   = searchParams.get("boardId");
     const limit     = Math.min(Number(searchParams.get("limit") ?? 25), 100);
     const offset    = Math.max(Number(searchParams.get("offset") ?? 0), 0);
+    const sort      = searchParams.get("sort") ?? "sends_desc";
+
+    const needsVideoJoin = sort === "has_video";
 
     const query = db("climbs")
-      .select("climbs.*", "boards.name as board_name")
+      .select(
+        "climbs.*",
+        "boards.name as board_name",
+        ...(needsVideoJoin ? [db.raw("(vid.climb_id IS NOT NULL) as has_video")] : []),
+      )
       .leftJoin("boards", "climbs.board_id", "boards.id")
-      .orderBy("climbs.name", "asc")
-      .limit(limit + 1)   // fetch one extra to determine hasMore
+      .limit(limit + 1)
       .offset(offset);
+
+    if (needsVideoJoin) {
+      query.leftJoin(
+        db("ticks").whereNotNull("instagram_url").distinct("climb_id").as("vid"),
+        "climbs.id",
+        "vid.climb_id",
+      );
+    }
+
+    // Apply sort order
+    if (sort === "star_rating_desc") {
+      query.orderByRaw("climbs.star_rating DESC NULLS LAST").orderBy("climbs.name", "asc");
+    } else if (sort === "grade_desc") {
+      const caseExpr = ALL_GRADES.map((g, i) => `WHEN '${g}' THEN ${i}`).join(" ");
+      query.orderByRaw(`CASE climbs.grade ${caseExpr} ELSE 999 END DESC`).orderBy("climbs.name", "asc");
+    } else if (sort === "grade_asc") {
+      const caseExpr = ALL_GRADES.map((g, i) => `WHEN '${g}' THEN ${i}`).join(" ");
+      query.orderByRaw(`CASE climbs.grade ${caseExpr} ELSE 999 END ASC`).orderBy("climbs.name", "asc");
+    } else if (sort === "has_video") {
+      query.orderByRaw("(vid.climb_id IS NOT NULL) DESC").orderBy("climbs.sends", "desc").orderBy("climbs.name", "asc");
+    } else {
+      // sends_desc (default)
+      query.orderBy("climbs.sends", "desc").orderBy("climbs.name", "asc");
+    }
 
     if (q)      query.whereILike("climbs.name", `%${q}%`);
     if (boardId) query.where("climbs.board_id", boardId);

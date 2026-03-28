@@ -30,6 +30,7 @@ export default function ClimbsPage() {
   const [boardId, setBoardId]   = useState<string>("");
   const [angleMin, setAngleMin] = useState<string>("");
   const [angleMax, setAngleMax] = useState<string>("");
+  const [sort, setSort]         = useState("sends_desc");
 
   // Dropdown open state
   const [gradeOpen, setGradeOpen] = useState(false);
@@ -56,6 +57,7 @@ export default function ClimbsPage() {
     if (boardId)  f.boardId  = boardId;
     if (angleMin) f.angleMin = Number(angleMin);
     if (angleMax) f.angleMax = Number(angleMax);
+    if (sort)     f.sort     = sort;
     return f;
   }
 
@@ -72,7 +74,7 @@ export default function ClimbsPage() {
       .catch(() => { setClimbs([]); setHasMore(false); })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, gradeMin, gradeMax, boardId, angleMin, angleMax]);
+  }, [query, gradeMin, gradeMax, boardId, angleMin, angleMax, sort]);
 
   // Load next page
   const loadMore = useCallback(() => {
@@ -87,7 +89,7 @@ export default function ClimbsPage() {
       .catch(() => {})
       .finally(() => setLoadingMore(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingMore, hasMore, query, gradeMin, gradeMax, boardId, angleMin, angleMax]);
+  }, [loadingMore, hasMore, query, gradeMin, gradeMax, boardId, angleMin, angleMax, sort]);
 
   // IntersectionObserver on sentinel
   useEffect(() => {
@@ -189,6 +191,19 @@ export default function ClimbsPage() {
 
       {/* Search + filter row */}
       <div className="flex flex-wrap gap-2 mb-6">
+
+        {/* Sort selector */}
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+          className="bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-stone-300 text-sm font-medium focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
+        >
+          <option value="sends_desc">Most Repeats</option>
+          <option value="star_rating_desc">Top Rated</option>
+          <option value="grade_desc">Hardest First</option>
+          <option value="grade_asc">Easiest First</option>
+          <option value="has_video">Has Video</option>
+        </select>
 
         {/* Search bar */}
         <div className="relative flex-1 min-w-48">

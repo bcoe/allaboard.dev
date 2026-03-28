@@ -29,6 +29,7 @@ export interface ClimbFilters {
   angleMin?: number;
   angleMax?: number;
   boardId?: string;
+  sort?: string;
   limit?: number;
   offset?: number;
 }
@@ -41,6 +42,7 @@ export async function getClimbs(filters?: ClimbFilters): Promise<{ climbs: Climb
   if (filters?.angleMin != null) params.set("angleMin", String(filters.angleMin));
   if (filters?.angleMax != null) params.set("angleMax", String(filters.angleMax));
   if (filters?.boardId)       params.set("boardId",  filters.boardId);
+  if (filters?.sort)          params.set("sort",     filters.sort);
   if (filters?.limit  != null) params.set("limit",   String(filters.limit));
   if (filters?.offset != null) params.set("offset",  String(filters.offset));
   const qs = params.toString();
