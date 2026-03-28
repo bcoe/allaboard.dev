@@ -1,41 +1,65 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { BoardType, Grade } from "@/lib/types";
+import { Grade, Board } from "@/lib/types";
 import { createClimb } from "@/lib/db";
 import { ALL_GRADES } from "@/lib/utils";
+import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
 
-const BOARDS: BoardType[] = ["Kilter", "Moonboard"];
-
 export default function NewClimbPage() {
-  const router = useRouter();
-  const [submitted, setSubmitted] = useState(false);
+  const router  = useRouter();
+  const { user, loading } = useAuth();
+
+  const [boards, setBoards]           = useState<Board[]>([]);
+  const [submitting, setSubmitting]   = useState(false);
+  const [error, setError]             = useState("");
+
+  // Redirect unauthenticated users
+  useEffect(() => {
+    if (!loading && !user) router.replace("/");
+  }, [user, loading, router]);
+
+  // Load boards
+  useEffect(() => {
+    fetch("/api/boards")
+      .then((r) => r.json())
+      .then(setBoards)
+      .catch(() => {});
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setSubmitting(true);
+    setError("");
+
     const fd = new FormData(e.currentTarget);
-    await createClimb({
-      name:        fd.get("name") as string,
-      grade:       fd.get("grade") as Grade,
-      boardType:   fd.get("boardType") as BoardType,
-      angle:       fd.get("angle") ? Number(fd.get("angle")) : undefined,
-      description: fd.get("description") as string,
-      sends:       fd.get("sends") ? Number(fd.get("sends")) : undefined,
-    });
-    setSubmitted(true);
-    setTimeout(() => router.push("/climbs"), 1200);
+
+    try {
+      const climb = await createClimb({
+        name:        (fd.get("name") as string).trim(),
+        grade:       fd.get("grade") as Grade,
+        boardId:     fd.get("boardId") as string,
+        angle:       fd.get("angle") ? Number(fd.get("angle")) : 40,
+        description: (fd.get("description") as string).trim(),
+        setter:      (fd.get("setter") as string).trim() || undefined,
+      });
+      router.push(`/climbs/${climb.id}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("409")) {
+        setError("A climb with this name, grade, angle and board already exists.");
+      } else {
+        setError("Failed to submit climb. Please try again.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  if (submitted) {
-    return (
-      <div className="max-w-xl mx-auto text-center py-16">
-        <div className="text-4xl mb-4">🎉</div>
-        <h2 className="text-2xl font-bold text-white">Climb submitted!</h2>
-        <p className="text-stone-400 mt-2">Redirecting back to the climbs list…</p>
-      </div>
-    );
+  if (loading || !user) {
+    return <div className="text-stone-500 text-center py-16">Loading…</div>;
   }
 
   return (
@@ -53,6 +77,8 @@ export default function NewClimbPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+
+        {/* Name */}
         <div>
           <label className="block text-sm font-medium text-stone-300 mb-1.5">
             Climb Name <span className="text-red-400">*</span>
@@ -66,6 +92,7 @@ export default function NewClimbPage() {
           />
         </div>
 
+        {/* Grade + Angle */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-stone-300 mb-1.5">
@@ -84,64 +111,79 @@ export default function NewClimbPage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-stone-300 mb-1.5">
-              Board Type <span className="text-red-400">*</span>
+              Angle (degrees)
             </label>
-            <select
-              name="boardType"
-              required
-              className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-orange-500 transition-colors"
-            >
-              <option value="">Select board</option>
-              {BOARDS.map((b) => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </select>
+            <input
+              type="number"
+              name="angle"
+              min={0}
+              max={90}
+              defaultValue={40}
+              className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-white placeholder:text-stone-500 focus:outline-none focus:border-orange-500 transition-colors"
+            />
           </div>
         </div>
 
+        {/* Board */}
         <div>
           <label className="block text-sm font-medium text-stone-300 mb-1.5">
-            Board Angle (degrees)
+            Board <span className="text-red-400">*</span>
+          </label>
+          <div className="flex flex-col gap-2">
+            {boards.map((board) => (
+              <label
+                key={board.id}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg border border-stone-700 bg-stone-900 hover:border-stone-500 cursor-pointer transition-colors has-[:checked]:border-orange-500 has-[:checked]:bg-stone-800"
+              >
+                <input
+                  type="radio"
+                  name="boardId"
+                  value={board.id}
+                  required
+                  className="accent-orange-500"
+                />
+                <span className="text-white text-sm">{board.name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Setter */}
+        <div>
+          <label className="block text-sm font-medium text-stone-300 mb-1.5">
+            Setter
+            <span className="text-stone-500 font-normal ml-1">(optional — free-form name)</span>
           </label>
           <input
-            type="number"
-            name="angle"
-            min={0}
-            max={70}
-            placeholder="e.g. 40"
+            type="text"
+            name="setter"
+            placeholder="e.g. Chris Sharma"
             className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-white placeholder:text-stone-500 focus:outline-none focus:border-orange-500 transition-colors"
           />
         </div>
 
+        {/* Description */}
         <div>
           <label className="block text-sm font-medium text-stone-300 mb-1.5">
-            Description / Beta <span className="text-red-400">*</span>
+            Description / Beta
+            <span className="text-stone-500 font-normal ml-1">(optional)</span>
           </label>
           <textarea
             name="description"
-            required
             rows={4}
             placeholder="Describe the moves, crux, holds, and any beta that helped you…"
             className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-white placeholder:text-stone-500 focus:outline-none focus:border-orange-500 transition-colors resize-none"
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-stone-300 mb-1.5">Sends</label>
-          <input
-            type="number"
-            name="sends"
-            min={0}
-            placeholder="Times sent?"
-            className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-white placeholder:text-stone-500 focus:outline-none focus:border-orange-500 transition-colors"
-          />
-        </div>
+        {error && <p className="text-red-400 text-sm">{error}</p>}
 
         <button
           type="submit"
-          className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-3 rounded-lg transition-colors mt-2"
+          disabled={submitting}
+          className="w-full bg-orange-500 hover:bg-orange-400 disabled:bg-stone-700 disabled:text-stone-500 text-white font-semibold py-3 rounded-lg transition-colors mt-2"
         >
-          Submit Climb
+          {submitting ? "Submitting…" : "Submit Climb"}
         </button>
       </form>
     </div>

@@ -184,7 +184,7 @@ export default function OnboardingPage() {
             className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-orange-500 transition-colors"
           >
             <option value="">Not sure yet</option>
-            {[...ALL_GRADES].reverse().map((grade) => (
+            {ALL_GRADES.map((grade) => (
               <option key={grade} value={grade}>{grade}</option>
             ))}
           </select>

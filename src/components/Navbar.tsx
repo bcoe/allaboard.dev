@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useRef, useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
@@ -29,9 +30,9 @@ export default function Navbar() {
 
   return (
     <nav className="bg-stone-900 border-b border-stone-700 sticky top-0 z-40">
-      <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-        <Link href="/" className="text-white font-bold text-xl tracking-tight">
-          allaboard
+      <div className="max-w-5xl mx-auto px-4 py-2 flex items-center justify-between">
+        <Link href="/" className="flex items-center">
+          <Image src="/logo.png" alt="Allaboard" width={78} height={78} priority />
         </Link>
 
         <div className="flex items-center gap-1">
@@ -63,7 +64,7 @@ export default function Navbar() {
               aria-label="Account menu"
               className="rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-stone-900"
             >
-              <UserAvatar user={user} size="sm" />
+              <UserAvatar user={user} size="xl" />
             </button>
 
             {dropdownOpen && (

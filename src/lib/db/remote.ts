@@ -3,7 +3,7 @@
  * Credentials are included on every request so the auth session cookie is sent.
  */
 
-import { Climb, User, Session, LogEntry, ClimberStats, FeedActivity } from "@/lib/types";
+import { Climb, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity } from "@/lib/types";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -22,8 +22,29 @@ export function resetStorage(): void { /* no-op */ }
 
 // ─── Climbs ───────────────────────────────────────────────────────────────────
 
-export async function getClimbs(): Promise<Climb[]> {
-  return api<Climb[]>("/climbs");
+export interface ClimbFilters {
+  q?: string;
+  gradeMin?: string;
+  gradeMax?: string;
+  angleMin?: number;
+  angleMax?: number;
+  boardId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function getClimbs(filters?: ClimbFilters): Promise<{ climbs: Climb[]; hasMore: boolean }> {
+  const params = new URLSearchParams();
+  if (filters?.q)             params.set("q",        filters.q);
+  if (filters?.gradeMin)      params.set("gradeMin", filters.gradeMin);
+  if (filters?.gradeMax)      params.set("gradeMax", filters.gradeMax);
+  if (filters?.angleMin != null) params.set("angleMin", String(filters.angleMin));
+  if (filters?.angleMax != null) params.set("angleMax", String(filters.angleMax));
+  if (filters?.boardId)       params.set("boardId",  filters.boardId);
+  if (filters?.limit  != null) params.set("limit",   String(filters.limit));
+  if (filters?.offset != null) params.set("offset",  String(filters.offset));
+  const qs = params.toString();
+  return api<{ climbs: Climb[]; hasMore: boolean }>(`/climbs${qs ? `?${qs}` : ""}`);
 }
 
 export async function getClimbById(id: string): Promise<Climb | undefined> {
@@ -34,9 +55,39 @@ export async function getClimbById(id: string): Promise<Climb | undefined> {
   }
 }
 
-export async function createClimb(data: Omit<Climb, "id" | "createdAt" | "author">): Promise<Climb> {
+export async function createClimb(data: {
+  name: string;
+  grade: string;
+  boardId: string;
+  angle?: number;
+  description?: string;
+  setter?: string;
+}): Promise<Climb> {
   return api<Climb>("/climbs", { method: "POST", body: JSON.stringify(data) });
 }
+
+export async function updateClimb(
+  id: string,
+  patch: Partial<{ name: string; grade: string; boardId: string; angle: number; description: string; setter: string }>,
+): Promise<Climb> {
+  return api<Climb>(`/climbs/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export async function tickClimb(
+  climbId: string,
+  data: { date: string; sent: boolean; suggestedGrade?: string; rating: number; comment?: string; instagramUrl?: string },
+): Promise<Tick> {
+  return api<Tick>(`/climbs/${climbId}/ticks`, { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function getUserTicks(userId: string): Promise<UserTick[]> {
+  return api<UserTick[]>(`/ticks?userId=${encodeURIComponent(userId)}`);
+}
+
+export async function getClimbTicks(climbId: string): Promise<Tick[]> {
+  return api<Tick[]>(`/climbs/${climbId}/ticks`);
+}
+
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 

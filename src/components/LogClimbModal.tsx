@@ -17,7 +17,8 @@ export default function LogClimbModal({ userId, onClose, onLogged }: Props) {
 
   useEffect(() => {
     void (async () => {
-      setClimbs(await getClimbs());
+      const { climbs } = await getClimbs();
+      setClimbs(climbs);
     })();
   }, []);
 
@@ -76,7 +77,7 @@ export default function LogClimbModal({ userId, onClose, onLogged }: Props) {
               <option value="">Select a climb…</option>
               {climbs.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} ({c.grade}) · {c.boardType}
+                  {c.name} ({c.grade}) · {c.boardName}
                 </option>
               ))}
             </select>

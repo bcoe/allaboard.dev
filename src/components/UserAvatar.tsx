@@ -5,9 +5,10 @@ export default function UserAvatar({
   size = "md",
 }: {
   user: User;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
 }) {
   const dims =
+    size === "xl" ? "w-[47px] h-[47px] text-lg" :
     size === "lg" ? "w-16 h-16 text-xl" :
     size === "sm" ? "w-7 h-7 text-xs"  :
                     "w-9 h-9 text-sm";

@@ -1,50 +1,83 @@
 export type Grade =
   | "V0" | "V1" | "V2" | "V3" | "V4" | "V5" | "V6" | "V7" | "V8"
-  | "V9" | "V10" | "V11" | "V12" | "V13" | "V14" | "V15" | "V16";
+  | "V9" | "V10" | "V11" | "V12" | "V13" | "V14" | "V15" | "V16"
+  | "V17" | "V18";
 
-export type BoardType = "Kilter" | "Moonboard";
+export interface Board {
+  id: string;   // text slug, e.g. 'kilter-original'
+  name: string; // e.g. 'Kilter Board (Original)'
+}
 
 export interface BetaVideo {
   url: string;
-  thumbnail: string;
-  platform: "instagram" | "youtube";
-  credit?: string; // e.g. "@alex_sends"
+  thumbnail?: string; // may be absent if instagram oEmbed unavailable
+}
+
+export interface Tick {
+  id: string;
+  climbId: string;
+  userId: string;
+  suggestedGrade?: Grade;
+  rating: 1 | 2 | 3 | 4;
+  comment?: string;
+  instagramUrl?: string;
+  sent: boolean;
+  date: string;        // date the tick happened (YYYY-MM-DD)
+  createdAt: string;
+}
+
+export interface UserTick {
+  id: string;
+  climbId: string;
+  climbName: string;
+  grade: Grade;
+  boardName: string;
+  angle: number;
+  suggestedGrade?: Grade;
+  rating: number;
+  comment?: string;
+  instagramUrl?: string;
+  sent: boolean;
+  date: string;
+  createdAt: string;
 }
 
 export interface Climb {
   id: string;
   name: string;
   grade: Grade;
-  boardType: BoardType;
-  angle?: number;
+  boardId: string;
+  boardName: string;
+  angle: number;       // 0–90; default 40
   description: string;
   betaVideos?: BetaVideo[];
-  author: string;       // handle of the user who submitted it
-  setter?: string;      // common name of the route setter
+  author: string;      // handle of the user who submitted it
+  setter?: string;     // free-form route setter name
+  starRating?: number; // aggregated avg from ticks.rating
+  sends: number;
   createdAt: string;
-  sends?: number;
 }
 
 export interface User {
   id: string;
   handle: string;
   displayName: string;
-  avatarColor: string; // tailwind bg color class for placeholder avatar
-  profilePictureUrl?: string; // Google account photo URL, if available
+  avatarColor: string;
+  profilePictureUrl?: string;
   bio: string;
-  homeBoard: BoardType;
+  homeBoard: string;
   homeBoardAngle: number;
   joinedAt: string;
   followersCount: number;
   followingCount: number;
-  personalBests: Partial<Record<BoardType, Grade>>;
+  personalBests: Partial<Record<string, Grade>>;
 }
 
 export interface LogEntry {
   id: string;
   climbId: string;
   userId: string;
-  date: string; // ISO date "2026-03-12"
+  date: string;
   attempts: number;
   sent: boolean;
   notes?: string;
@@ -54,7 +87,7 @@ export interface Session {
   id: string;
   userId: string;
   date: string;
-  boardType: BoardType;
+  boardType: string;
   angle: number;
   durationMinutes: number;
   logEntries: LogEntry[];
@@ -82,8 +115,9 @@ export interface FeedActivity {
   id: string;
   user: User;
   climb: Climb;
-  date: string;
-  attempts: number;
+  date: string;        // date of the tick
   sent: boolean;
-  notes?: string;
+  rating: number;
+  comment?: string;
+  suggestedGrade?: Grade;
 }

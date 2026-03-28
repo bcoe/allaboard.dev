@@ -6,8 +6,9 @@ import { getFeedActivities } from "@/lib/db";
 import { useAuth } from "@/lib/auth-context";
 import { timeAgo } from "@/lib/utils";
 import GradeBadge from "@/components/GradeBadge";
+import StarRating from "@/components/StarRating";
 import UserAvatar from "@/components/UserAvatar";
-import LogClimbModal from "@/components/LogClimbModal";
+import TickModal from "@/components/TickModal";
 
 type FeedTab = "all" | "following";
 
@@ -15,7 +16,7 @@ export default function FeedClient() {
   const { user } = useAuth();
   const [tab, setTab] = useState<FeedTab>("all");
   const [activities, setActivities] = useState<FeedActivity[]>([]);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [tickTarget, setTickTarget] = useState<{ id: string; name: string } | null>(null);
 
   const reload = useCallback(() => {
     const userId = tab === "following" && user ? user.id : undefined;
@@ -33,8 +34,13 @@ export default function FeedClient() {
 
   return (
     <>
-      {modalOpen && user && (
-        <LogClimbModal userId={user.id} onClose={() => setModalOpen(false)} onLogged={reload} />
+      {tickTarget && user && (
+        <TickModal
+          climbId={tickTarget.id}
+          climbName={tickTarget.name}
+          onClose={() => setTickTarget(null)}
+          onSuccess={reload}
+        />
       )}
 
       <div className="flex items-center justify-between mb-6">
@@ -48,14 +54,6 @@ export default function FeedClient() {
             </TabButton>
           )}
         </div>
-        {user && (
-          <button
-            onClick={() => setModalOpen(true)}
-            className="bg-orange-500 hover:bg-orange-400 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
-          >
-            + Log Climb
-          </button>
-        )}
       </div>
 
       {activities.length === 0 ? (
@@ -63,7 +61,12 @@ export default function FeedClient() {
       ) : (
         <div className="flex flex-col gap-4">
           {activities.map((activity) => (
-            <ActivityCard key={activity.id} activity={activity} />
+            <ActivityCard
+              key={activity.id}
+              activity={activity}
+              canTick={!!user}
+              onTick={() => setTickTarget({ id: activity.climb.id, name: activity.climb.name })}
+            />
           ))}
         </div>
       )}
@@ -94,8 +97,16 @@ function TabButton({
   );
 }
 
-function ActivityCard({ activity }: { activity: FeedActivity }) {
-  const { user, climb, sent, attempts, notes, date } = activity;
+function ActivityCard({
+  activity,
+  canTick,
+  onTick,
+}: {
+  activity: FeedActivity;
+  canTick: boolean;
+  onTick: () => void;
+}) {
+  const { user, climb, sent, rating, comment, date } = activity;
   return (
     <div className="bg-stone-800 border border-stone-700 rounded-xl p-4">
       <div className="flex items-start gap-3">
@@ -117,17 +128,30 @@ function ActivityCard({ activity }: { activity: FeedActivity }) {
             <span className="text-stone-500 text-sm">—</span>
             <span className="text-white text-sm font-medium">{climb.name}</span>
             <GradeBadge grade={climb.grade} />
-            <span className="text-stone-500 text-xs">{climb.boardType}</span>
+            {climb.boardName && (
+              <span className="text-stone-500 text-xs">{climb.boardName}</span>
+            )}
           </div>
 
-          {notes && (
-            <p className="mt-2 text-stone-300 text-sm leading-relaxed">{notes}</p>
+          <div className="mt-2 flex items-center gap-3">
+            <StarRating value={Math.round(rating)} size="sm" />
+            {climb.angle !== undefined && (
+              <span className="text-xs text-stone-500">{climb.angle}°</span>
+            )}
+          </div>
+
+          {comment && (
+            <p className="mt-2 text-stone-300 text-sm leading-relaxed">{comment}</p>
           )}
 
-          <div className="mt-2 text-xs text-stone-500">
-            {attempts} {attempts === 1 ? "attempt" : "attempts"}
-            {climb.angle !== undefined && ` · ${climb.angle}°`}
-          </div>
+          {canTick && (
+            <button
+              onClick={onTick}
+              className="mt-3 text-xs text-orange-400 hover:text-orange-300 font-medium transition-colors"
+            >
+              Tick this climb →
+            </button>
+          )}
         </div>
       </div>
     </div>

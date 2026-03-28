@@ -192,9 +192,9 @@ export function logClimb({
       user,
       climb,
       date: new Date().toISOString(),
-      attempts,
       sent,
-      notes,
+      rating: 3,
+      comment: notes,
     };
     const feed = read<FeedActivity[]>(K.feed) ?? [];
     write(K.feed, [activity, ...feed]);

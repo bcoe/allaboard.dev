@@ -242,6 +242,93 @@ if (!session.userId) return NextResponse.json({ error: "Unauthenticated" }, { st
 
 ---
 
+## Resource Specifications
+
+### Climbs
+
+#### Overview
+A climb is the core content unit of allaboard. Climbs are browsable by everyone; only authenticated users may submit new climbs or tick them.
+
+#### Data model
+
+**`climbs` table** (pending migrations noted below):
+| Column | Type | Notes |
+|--------|------|-------|
+| id | UUID v4 | primary key |
+| name | text | |
+| grade | text | V0–V18 |
+| board_id | UUID | FK → boards.id (**replaces `board_type` text column**) |
+| angle | integer | 0–90; default 40 |
+| description | text | optional |
+| author | text | FK → users.id; the user who submitted the climb (protected resource owner) |
+| setter | text | free-form name; independent from author; nullable |
+| star_rating | numeric | aggregated average from `ticks.rating`; updated on each tick |
+| sends | integer | incremented on each tick where `sent = true` |
+| created_at | timestamp | |
+
+**Unique constraint:** `(name, angle, grade, board_id)` — prevents duplicate climbs on the same board.
+
+**`beta_videos` table** (instagram links only):
+| Column | Type | Notes |
+|--------|------|-------|
+| id | increments | primary key |
+| climb_id | UUID | FK → climbs.id (CASCADE delete) |
+| url | text | full instagram post/reel URL pasted by the user |
+| thumbnail | text | thumbnail image URL (derived from instagram embed or stored externally) |
+| sort_order | integer | |
+
+**`ticks` table** (new — to be migrated):
+| Column | Type | Notes |
+|--------|------|-------|
+| id | UUID | primary key |
+| climb_id | UUID | FK → climbs.id (CASCADE delete) |
+| user_id | text | FK → users.id; the climber who ticked it |
+| suggested_grade | text | V0–V18; the climber's grade opinion |
+| rating | integer | 1–4 stars |
+| comment | text | nullable; free-form send notes |
+| instagram_url | text | nullable; instagram video of the send |
+| sent | boolean | true = completed, false = attempted only |
+| created_at | timestamp | |
+
+**Unique constraint on `ticks`:** `(climb_id, user_id)` — one tick per user per climb.
+
+#### Pending migrations
+The following schema changes are required before the climbs page is fully implemented:
+1. Replace `climbs.board_type` (text) with `climbs.board_id` (UUID FK → boards)
+2. Extend grade range from V16 → V18 (data only, no schema change needed since grade is stored as text)
+3. Add `climbs.star_rating` numeric column
+4. Add unique constraint on `(name, angle, grade, board_id)` to climbs
+5. Create `ticks` table with unique constraint on `(climb_id, user_id)`
+6. Drop `beta_videos.platform` and `beta_videos.credit` columns (instagram-only, no credit field)
+
+#### Climbs list page (`/climbs`)
+- Sorted alphabetically by name by default
+- Search bar filters by name (client-side or server-side debounced query param)
+- Filter by **grade** (multi-select, V0–V18)
+- Filter by **angle** (numeric range slider or min/max inputs, 0–90)
+- Authenticated users see a **"Submit Climb"** button; unauthenticated users do not
+- Each climb card shows: name, grade badge, board name, angle, star rating, send count
+
+#### Climb detail page (`/climbs/[id]`)
+- Shows all climb metadata: name, grade, board, angle, setter, star rating, send count
+- Instagram video thumbnails listed below — each is a clickable link to the instagram post
+- **Tick button** — visible to all authenticated users
+  - Opens a modal with:
+    - Suggested grade (V0–V18 select)
+    - Rating (1–4 stars — use a star-rating UI component)
+    - Comment (textarea, optional)
+    - Instagram video URL of their send (optional)
+  - On submit: creates/updates a `ticks` row, recalculates and updates `climbs.star_rating`, increments `climbs.sends` if `sent = true`
+- **Edit controls** (name, grade, board, angle, setter, instagram links) — only rendered when `useAuth().user?.id === climb.author` (ACL rule)
+
+#### ACL
+- **View:** public — no auth required
+- **Submit new climb:** requires auth (`session.userId` must be set)
+- **Edit / delete climb:** only the `author` (the user who submitted it)
+- **Tick a climb:** requires auth; one tick per user per climb (upsert on resubmit)
+
+---
+
 ## Access Control (ACL)
 
 ### Core rule
@@ -465,5 +552,6 @@ Next.js automatically loads these files (in priority order, highest last):
 | `DATABASE_URL_UNPOOLED` | Vercel (Neon auto) | Direct Neon connection — used for migrations and route handlers |
 | `DATABASE_URL` | Vercel (Neon auto) | Pooled Neon connection — fallback if above absent |
 | `PGUSER` | `.env.local` | Postgres user for local dev (only if differs from OS user) |
+| `META_APP_ACCESS_TOKEN` | `.env.local` / Vercel | `{App ID}|{Client Token}` from a Meta Developer app — required for Instagram oEmbed thumbnail fetching |
 
 `SESSION_SECRET` must also be added to Vercel Project → Settings → Environment Variables.
