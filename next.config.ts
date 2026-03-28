@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["knex", "pg", "pg-native"],
@@ -17,4 +18,27 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: "allaboard",
+  project: "javascript-nextjs",
+
+  // Auth token for uploading source maps (stored in env, never committed)
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // Suppress Sentry CLI output during builds
+  silent: !process.env.CI,
+
+  // Upload source maps to Sentry so stack traces show original code
+  widenClientFileUpload: true,
+
+  // Automatically instrument Next.js's server-side data fetching methods
+  autoInstrumentServerFunctions: true,
+
+  // Upload source maps and hide them from the browser bundle
+  sourcemaps: {
+    disable: false,
+  },
+
+  // Reduces bundle size by tree-shaking debug logging in production
+  disableLogger: true,
+});
