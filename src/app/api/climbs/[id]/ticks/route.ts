@@ -11,10 +11,33 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const ticks = await db("ticks")
-      .where({ climb_id: id })
-      .orderBy("created_at", "desc");
-    return NextResponse.json(ticks.map(toTick));
+    const rows = await db("ticks")
+      .join("users", "ticks.user_id", "users.id")
+      .where({ "ticks.climb_id": id })
+      .orderBy("ticks.date", "desc")
+      .orderBy("ticks.created_at", "desc")
+      .select(
+        "ticks.id", "ticks.date", "ticks.sent", "ticks.rating",
+        "ticks.comment", "ticks.suggested_grade", "ticks.instagram_url",
+        "ticks.attempts", "ticks.created_at",
+        "users.handle", "users.display_name", "users.avatar_color",
+        "users.profile_picture_url",
+      );
+    return NextResponse.json(rows.map((r) => ({
+      id:                   r.id,
+      userHandle:           r.handle,
+      userDisplayName:      r.display_name,
+      userAvatarColor:      r.avatar_color,
+      userProfilePictureUrl: r.profile_picture_url ?? undefined,
+      date:                 r.date,
+      sent:                 r.sent,
+      rating:               r.rating,
+      comment:              r.comment ?? undefined,
+      suggestedGrade:       r.suggested_grade ?? undefined,
+      instagramUrl:         r.instagram_url ?? undefined,
+      attempts:             r.attempts ?? undefined,
+      createdAt:            r.created_at,
+    })));
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Failed to fetch ticks" }, { status: 500 });

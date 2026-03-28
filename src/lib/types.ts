@@ -27,6 +27,23 @@ export interface Tick {
   createdAt: string;
 }
 
+/** A tick as shown on a climb's detail page — includes the author's handle. */
+export interface ClimbTick {
+  id: string;
+  userHandle: string;
+  userDisplayName: string;
+  userAvatarColor: string;
+  userProfilePictureUrl?: string;
+  suggestedGrade?: Grade;
+  rating: number;
+  comment?: string;
+  instagramUrl?: string;
+  sent: boolean;
+  attempts?: number;
+  date: string;
+  createdAt: string;
+}
+
 export interface UserTick {
   id: string;
   climbId: string;

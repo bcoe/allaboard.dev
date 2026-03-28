@@ -3,7 +3,7 @@
  * Credentials are included on every request so the auth session cookie is sent.
  */
 
-import { Climb, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity } from "@/lib/types";
+import { Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity } from "@/lib/types";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -98,8 +98,8 @@ export async function deleteTick(tickId: string): Promise<void> {
   await api<void>(`/ticks/${encodeURIComponent(tickId)}`, { method: "DELETE" });
 }
 
-export async function getClimbTicks(climbId: string): Promise<Tick[]> {
-  return api<Tick[]>(`/climbs/${climbId}/ticks`);
+export async function getClimbTicks(climbId: string): Promise<ClimbTick[]> {
+  return api<ClimbTick[]>(`/climbs/${climbId}/ticks`);
 }
 
 
