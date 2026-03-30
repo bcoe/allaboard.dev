@@ -9,12 +9,8 @@ Sentry.init({
   // Tracing — capture all traces in dev, sample in production
   tracesSampleRate: isDev ? 1.0 : 0.2,
 
-  // Session replay
-  replaysOnErrorSampleRate: 1.0,
-  replaysSessionSampleRate: isDev ? 1.0 : 0.1,
-
   integrations: [
-    Sentry.replayIntegration(),
+    Sentry.browserTracingIntegration(),
   ],
 
   // Log Sentry activity to the browser console in development
