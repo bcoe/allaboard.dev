@@ -129,6 +129,27 @@ export async function updateCurrentUser(userId: string, patch: Partial<Omit<User
   return api<User>(`/users/${encodeURIComponent(userId)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
+export async function getFollowers(handle: string): Promise<User[]> {
+  return api<User[]>(`/users/${encodeURIComponent(handle)}/followers`);
+}
+
+export async function getFollowing(handle: string): Promise<User[]> {
+  return api<User[]>(`/users/${encodeURIComponent(handle)}/following`);
+}
+
+export async function checkFollowing(handle: string): Promise<boolean> {
+  const { following } = await api<{ following: boolean }>(`/users/${encodeURIComponent(handle)}/follow`);
+  return following;
+}
+
+export async function followUser(handle: string): Promise<void> {
+  await api<{ following: boolean }>(`/users/${encodeURIComponent(handle)}/follow`, { method: "POST" });
+}
+
+export async function unfollowUser(handle: string): Promise<void> {
+  await api<{ following: boolean }>(`/users/${encodeURIComponent(handle)}/follow`, { method: "DELETE" });
+}
+
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
 export async function getSessions(userId?: string): Promise<Session[]> {

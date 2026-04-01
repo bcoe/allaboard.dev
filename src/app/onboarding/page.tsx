@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ALL_GRADES } from "@/lib/utils";
 
 interface Board {
   id: string;
@@ -29,7 +28,6 @@ function useDebounce<T>(value: T, delay: number): T {
 export default function OnboardingPage() {
   const [displayName, setDisplayName]           = useState("");
   const [handleStatus, setHandleStatus]         = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
-  const [maxGrade, setMaxGrade]                 = useState<string>("");
   const [boardId, setBoardId]                   = useState<string>("");
   const [boards, setBoards]                     = useState<Board[]>([]);
   const [submitting, setSubmitting]             = useState(false);
@@ -82,7 +80,7 @@ export default function OnboardingPage() {
         method:      "POST",
         headers:     { "Content-Type": "application/json" },
         credentials: "include",
-        body:        JSON.stringify({ displayName: displayName.trim(), maxGrade: maxGrade || undefined, boardId }),
+        body:        JSON.stringify({ displayName: displayName.trim(), boardId }),
       });
       if (res.ok) {
         // Hard navigation so AuthProvider remounts and re-fetches /api/auth/me
@@ -170,24 +168,6 @@ export default function OnboardingPage() {
               </label>
             ))}
           </div>
-        </div>
-
-        {/* Max V-grade */}
-        <div>
-          <label className="block text-sm font-medium text-stone-300 mb-1.5">
-            Highest V-grade climbed
-            <span className="text-stone-500 font-normal ml-1">(optional)</span>
-          </label>
-          <select
-            value={maxGrade}
-            onChange={(e) => setMaxGrade(e.target.value)}
-            className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-orange-500 transition-colors"
-          >
-            <option value="">Not sure yet</option>
-            {ALL_GRADES.map((grade) => (
-              <option key={grade} value={grade}>{grade}</option>
-            ))}
-          </select>
         </div>
 
         {submitError && (

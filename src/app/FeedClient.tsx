@@ -91,11 +91,13 @@ function ActivityCard({ activity }: { activity: FeedActivity }) {
   return (
     <div className="bg-stone-800 border border-stone-700 rounded-xl p-4">
       <div className="flex items-start gap-3">
-        <UserAvatar user={user} size="md" />
+        <Link href={`/user/${user.handle}`}>
+          <UserAvatar user={user} size="md" />
+        </Link>
         <div className="flex-1 min-w-0">
 
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-white font-semibold text-sm">@{user.handle}</span>
+            <Link href={`/user/${user.handle}`} className="text-white font-semibold text-sm hover:text-orange-400 transition-colors">@{user.handle}</Link>
             <span className="text-stone-600 text-xs">·</span>
             <span className="text-stone-500 text-xs">{timeAgo(date)}</span>
           </div>

@@ -23,8 +23,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Already onboarded" }, { status: 400 });
   }
 
-  const { displayName, maxGrade, boardId } =
-    await req.json() as { displayName: string; maxGrade?: string; boardId: string };
+  const { displayName, boardId } =
+    await req.json() as { displayName: string; boardId: string };
 
   if (!displayName?.trim() || !boardId) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -64,10 +64,6 @@ export async function POST(req: NextRequest) {
     home_board_angle:     40,
     email:                oauthAccount.email,
     profile_picture_url:  oauthAccount.profile_picture_url ?? null,
-    // Store the self-reported max grade against both board types for now;
-    // can be refined per-board later.
-    personal_best_kilter:    maxGrade ?? null,
-    personal_best_moonboard: maxGrade ?? null,
   });
 
   // Link oauth_accounts → users

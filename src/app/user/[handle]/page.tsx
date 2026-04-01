@@ -3,7 +3,17 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { Board, Grade, User, UserTick } from "@/lib/types";
-import { getUserById, getUserTicks, deleteTick, updateCurrentUser } from "@/lib/db";
+import {
+  getUserById,
+  getUserTicks,
+  deleteTick,
+  updateCurrentUser,
+  getFollowers,
+  getFollowing,
+  checkFollowing,
+  followUser,
+  unfollowUser,
+} from "@/lib/db";
 import { useAuth } from "@/lib/auth-context";
 import { ALL_GRADES, timeAgo } from "@/lib/utils";
 import UserAvatar from "@/components/UserAvatar";
@@ -11,6 +21,8 @@ import GradeBadge from "@/components/GradeBadge";
 import StarRating from "@/components/StarRating";
 import TickModal from "@/components/TickModal";
 import Link from "next/link";
+
+type SocialTab = "ticks" | "followers" | "following";
 
 export default function UserProfilePage() {
   const params = useParams<{ handle: string }>();
@@ -27,6 +39,12 @@ export default function UserProfilePage() {
     tick?: UserTick;
     tickId?: string;
   } | null>(null);
+
+  const [activeTab, setActiveTab] = useState<SocialTab>("ticks");
+  const [followers, setFollowers] = useState<User[]>([]);
+  const [following, setFollowing] = useState<User[]>([]);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
 
   useEffect(() => {
     if (!handle) return;
@@ -49,6 +67,18 @@ export default function UserProfilePage() {
   }, [handle]);
 
   useEffect(reload, [reload]);
+
+  // Load followers/following and follow status
+  useEffect(() => {
+    if (!handle) return;
+    void getFollowers(handle).then(setFollowers);
+    void getFollowing(handle).then(setFollowing);
+  }, [handle]);
+
+  useEffect(() => {
+    if (!handle || !currentUser) return;
+    void checkFollowing(handle).then(setIsFollowing);
+  }, [handle, currentUser]);
 
   if (notFound) {
     return <div className="text-center py-24 text-stone-500">User not found.</div>;
@@ -78,6 +108,34 @@ export default function UserProfilePage() {
     }
   }
 
+  async function handleFollow() {
+    if (!handle) return;
+    setFollowLoading(true);
+    try {
+      if (isFollowing) {
+        await unfollowUser(handle);
+        setIsFollowing(false);
+        setFollowers((prev) => prev.filter((u) => u.id !== currentUser?.id));
+        setProfileUser((prev) => prev ? { ...prev, followersCount: prev.followersCount - 1 } : prev);
+      } else {
+        await followUser(handle);
+        setIsFollowing(true);
+        if (currentUser) {
+          setFollowers((prev) => [currentUser as User, ...prev]);
+        }
+        setProfileUser((prev) => prev ? { ...prev, followersCount: prev.followersCount + 1 } : prev);
+      }
+    } finally {
+      setFollowLoading(false);
+    }
+  }
+
+  async function handleUnfollowFromList(targetHandle: string) {
+    await unfollowUser(targetHandle);
+    setFollowing((prev) => prev.filter((u) => u.handle !== targetHandle));
+    setProfileUser((prev) => prev ? { ...prev, followingCount: prev.followingCount - 1 } : prev);
+  }
+
   return (
     <div className="max-w-2xl mx-auto">
       {tickTarget && (
@@ -95,8 +153,25 @@ export default function UserProfilePage() {
       <div className="flex items-start gap-5">
         <UserAvatar user={profileUser} size="lg" />
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-white">{profileUser.displayName}</h1>
-          <p className="text-stone-400 text-sm mt-0.5">@{profileUser.handle}</p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold text-white">{profileUser.displayName}</h1>
+              <p className="text-stone-400 text-sm mt-0.5">@{profileUser.handle}</p>
+            </div>
+            {!isOwn && currentUser && (
+              <button
+                onClick={handleFollow}
+                disabled={followLoading}
+                className={`shrink-0 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                  isFollowing
+                    ? "bg-stone-700 text-stone-300 hover:bg-stone-600 border border-stone-600"
+                    : "bg-orange-500 text-white hover:bg-orange-400"
+                }`}
+              >
+                {followLoading ? "…" : isFollowing ? "Unfollow" : "Follow"}
+              </button>
+            )}
+          </div>
           {profileUser.bio && (
             <p className="text-stone-300 text-sm mt-2 leading-relaxed">{profileUser.bio}</p>
           )}
@@ -187,28 +262,85 @@ export default function UserProfilePage() {
         </section>
       )}
 
-      {/* Tick list */}
-      <section className="mt-8 pb-8">
-        <h2 className="text-orange-400 font-semibold text-lg mb-3">Tick List</h2>
-        {ticks.length === 0 ? (
-          <p className="text-stone-500 text-sm">No ticks yet.</p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {ticks.map((tick) => (
-              <TickCard
-                key={tick.id}
-                tick={tick}
-                canEdit={isOwn}
-                onEdit={() =>
-                  setTickTarget({ climbId: tick.climbId, climbName: tick.climbName, tick, tickId: tick.id })
-                }
-                onDelete={async () => {
-                  await deleteTick(tick.id);
-                  reload();
-                }}
-              />
-            ))}
-          </div>
+      {/* Tab nav */}
+      <div className="mt-8 flex gap-1 border-b border-stone-800">
+        {(["ticks", "followers", "following"] as SocialTab[]).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
+              activeTab === tab
+                ? "border-orange-500 text-orange-400"
+                : "border-transparent text-stone-500 hover:text-stone-300"
+            }`}
+          >
+            {tab === "ticks"
+              ? `Ticks (${ticks.length})`
+              : tab === "followers"
+              ? `Followers (${profileUser.followersCount})`
+              : `Following (${profileUser.followingCount})`}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <section className="mt-4 pb-8">
+        {activeTab === "ticks" && (
+          ticks.length === 0 ? (
+            <p className="text-stone-500 text-sm">No ticks yet.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {ticks.map((tick) => (
+                <TickCard
+                  key={tick.id}
+                  tick={tick}
+                  canEdit={isOwn}
+                  onEdit={() =>
+                    setTickTarget({ climbId: tick.climbId, climbName: tick.climbName, tick, tickId: tick.id })
+                  }
+                  onDelete={async () => {
+                    await deleteTick(tick.id);
+                    reload();
+                  }}
+                />
+              ))}
+            </div>
+          )
+        )}
+
+        {activeTab === "followers" && (
+          followers.length === 0 ? (
+            <p className="text-stone-500 text-sm">No followers yet.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {followers.map((u) => (
+                <UserRow key={u.id} user={u} />
+              ))}
+            </div>
+          )
+        )}
+
+        {activeTab === "following" && (
+          following.length === 0 ? (
+            <p className="text-stone-500 text-sm">Not following anyone yet.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {following.map((u) => (
+                <UserRow
+                  key={u.id}
+                  user={u}
+                  action={isOwn ? (
+                    <button
+                      onClick={() => handleUnfollowFromList(u.handle)}
+                      className="text-xs text-stone-500 hover:text-red-400 transition-colors"
+                    >
+                      Unfollow
+                    </button>
+                  ) : undefined}
+                />
+              ))}
+            </div>
+          )
         )}
       </section>
     </div>
@@ -220,6 +352,23 @@ function Tile({ value, label, accent }: { value: number; label: string; accent?:
     <div className="bg-stone-800 border border-stone-700 rounded-xl px-4 py-3 text-center">
       <div className={`text-2xl font-bold ${accent ?? "text-white"}`}>{value}</div>
       <div className="text-stone-400 text-xs mt-0.5">{label}</div>
+    </div>
+  );
+}
+
+function UserRow({ user, action }: { user: User; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 bg-stone-800 border border-stone-700 rounded-xl px-4 py-3">
+      <Link href={`/user/${user.handle}`} className="flex items-center gap-3 min-w-0 group">
+        <UserAvatar user={user} size="sm" />
+        <div className="min-w-0">
+          <div className="text-white text-sm font-medium group-hover:text-orange-400 transition-colors truncate">
+            {user.displayName}
+          </div>
+          <div className="text-stone-500 text-xs">@{user.handle}</div>
+        </div>
+      </Link>
+      {action}
     </div>
   );
 }
