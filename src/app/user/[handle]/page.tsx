@@ -27,7 +27,7 @@ type SocialTab = "ticks" | "followers" | "following";
 export default function UserProfilePage() {
   const params = useParams<{ handle: string }>();
   const handle = params.handle;
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, updateUser } = useAuth();
 
   const [profileUser, setProfileUser] = useState<User | null>(null);
   const [ticks, setTicks] = useState<UserTick[]>([]);
@@ -186,6 +186,7 @@ export default function UserProfilePage() {
                     if (!board) return;
                     const updated = await updateCurrentUser(profileUser.id, { homeBoard: board.name });
                     setProfileUser(updated);
+                    if (isOwn) updateUser(updated);
                   }}
                   className="bg-stone-800 border border-stone-700 rounded px-2 py-0.5 text-xs text-white focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
                 >

@@ -7,12 +7,14 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   logout: () => void;
+  updateUser: (u: User) => void;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   loading: true,
   logout: () => {},
+  updateUser: () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -33,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, logout }}>
+    <AuthContext.Provider value={{ user, loading, logout, updateUser: setUser }}>
       {children}
     </AuthContext.Provider>
   );
