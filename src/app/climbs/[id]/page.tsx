@@ -98,9 +98,11 @@ export default function ClimbPage() {
                 {climb.boardName}
               </span>
             )}
-            <span className="text-stone-400 text-sm bg-stone-800/60 px-2.5 py-1 rounded">
-              {climb.angle}°
-            </span>
+            {climb.angle != null && (
+              <span className="text-stone-400 text-sm bg-stone-800/60 px-2.5 py-1 rounded">
+                {climb.angle}°
+              </span>
+            )}
             <div className="ml-auto flex items-center gap-3">
               {climb.starRating != null && (
                 <div className="flex items-center gap-1.5">

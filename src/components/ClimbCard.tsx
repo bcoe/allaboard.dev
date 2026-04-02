@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Climb } from "@/lib/types";
 import GradeBadge from "./GradeBadge";
 import StarRating from "./StarRating";
@@ -32,9 +33,11 @@ export default function ClimbCard({ climb, canTick, onTick }: ClimbCardProps) {
                   {climb.boardName}
                 </span>
               )}
-              <span className="text-stone-400 text-xs bg-stone-700/60 px-2 py-0.5 rounded">
-                {climb.angle}°
-              </span>
+              {climb.angle != null && (
+                <span className="text-stone-400 text-xs bg-stone-700/60 px-2 py-0.5 rounded">
+                  {climb.angle}°
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-3 shrink-0">
               {climb.starRating != null && (
@@ -63,7 +66,13 @@ export default function ClimbCard({ climb, canTick, onTick }: ClimbCardProps) {
             <div className="flex items-center gap-4 text-xs text-stone-500">
               <span>
                 <span className="text-stone-600">submitted by </span>
-                <span className="text-stone-400">@{climb.author}</span>
+                <Link
+                  href={`/user/${climb.author}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-stone-400 hover:text-orange-400 transition-colors"
+                >
+                  @{climb.author}
+                </Link>
               </span>
               {climb.setter && (
                 <span>
@@ -75,7 +84,7 @@ export default function ClimbCard({ climb, canTick, onTick }: ClimbCardProps) {
             {canTick && onTick && (
               <button
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTick(); }}
-                className="text-xs text-orange-400 hover:text-orange-300 font-medium transition-colors shrink-0"
+                className="text-xs text-orange-400 hover:text-orange-300 font-medium transition-colors shrink-0 cursor-pointer"
               >
                 + Tick
               </button>
