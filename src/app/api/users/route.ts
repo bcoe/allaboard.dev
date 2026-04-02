@@ -1,3 +1,10 @@
+/**
+ * Users collection endpoint — list all registered users.
+ *
+ * @module api/users
+ * @packageDocumentation
+ */
+
 import { NextResponse } from "next/server";
 import db from "@/lib/server/db";
 
@@ -23,6 +30,21 @@ function toUser(row: Record<string, unknown>) {
 
 export { toUser };
 
+/**
+ * List all users, sorted alphabetically by handle.
+ *
+ * **Authentication:** Not required — user profiles are public.
+ *
+ * @returns Array of user objects (no `apiToken` field — tokens are only
+ *   returned when a user fetches their own profile via `GET /api/users/:handle`).
+ *
+ * @example
+ * ```bash
+ * curl https://allaboard.dev/api/users
+ * ```
+ *
+ * @returns `500` on database error.
+ */
 export async function GET() {
   try {
     const rows = await db("users").orderBy("handle");

@@ -1,3 +1,10 @@
+/**
+ * Ticks for a specific climb — list ticks and submit new ones.
+ *
+ * @module api/climbs/id/ticks
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { getIronSession } from "iron-session";
@@ -5,6 +12,19 @@ import { cookies } from "next/headers";
 import db from "@/lib/server/db";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 
+/**
+ * List all ticks for a climb, newest first.
+ *
+ * **Authentication:** Not required — ticks are public.
+ *
+ * @param _req - Incoming request (unused).
+ * @param params - Route params. `id` is the climb UUID.
+ *
+ * @returns Array of tick objects, each embedding the submitting user's
+ *   handle, display name, avatar color, and profile picture URL.
+ *
+ * @returns `500` on database error.
+ */
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -44,6 +64,33 @@ export async function GET(
   }
 }
 
+/**
+ * Submit a tick (send record) for a climb.
+ *
+ * **Authentication:** Required — session cookie. One tick per user per climb;
+ * resubmitting replaces the existing tick.
+ *
+ * @param req - Incoming request. JSON body:
+ *   - `rating` *(required)* — star rating 1–4.
+ *   - `date` *(optional)* — ISO date string (`"YYYY-MM-DD"`); defaults to today.
+ *   - `sent` *(optional, default true)* — whether the climb was completed.
+ *   - `attempts` *(optional)* — number of attempts.
+ *   - `suggestedGrade` *(optional)* — the climber's grade opinion (`"V0"`–`"V18"`).
+ *   - `comment` *(optional)* — free-form send notes.
+ *   - `instagramUrl` *(optional)* — URL to an Instagram post/reel of the send.
+ * @param params - Route params. `id` is the climb UUID.
+ *
+ * @remarks
+ * After inserting the tick, `climbs.star_rating` and `climbs.sends` are
+ * recalculated atomically from the full tick set.
+ *
+ * @returns The created tick object with status `201`.
+ *
+ * @returns `400` if `rating` is missing or outside 1–4.
+ * @returns `401` if not authenticated.
+ * @returns `404` if the climb does not exist.
+ * @returns `500` on database error.
+ */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },

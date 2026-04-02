@@ -1,3 +1,10 @@
+/**
+ * Boards collection endpoint — list and create climbing boards.
+ *
+ * @module api/boards
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
@@ -17,6 +24,27 @@ function toBoard(row: Record<string, unknown>) {
 
 export { toBoard };
 
+/**
+ * List all boards, sorted alphabetically by name.
+ *
+ * **Authentication:** Not required — boards are public.
+ *
+ * @param req - Incoming request. Optional query parameter:
+ *   - `type` — filter to `"standard"` or `"spray_wall"`.
+ *
+ * @returns Array of board objects.
+ *
+ * @example
+ * ```bash
+ * # All boards
+ * curl https://allaboard.dev/api/boards
+ *
+ * # Only spray walls
+ * curl "https://allaboard.dev/api/boards?type=spray_wall"
+ * ```
+ *
+ * @returns `500` on database error.
+ */
 export async function GET(req: NextRequest) {
   try {
     const type = req.nextUrl.searchParams.get("type");
@@ -32,6 +60,29 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/**
+ * Create a new board.
+ *
+ * **Authentication:** Required — session cookie. The authenticated user
+ * becomes the `createdBy` owner of the board.
+ *
+ * @param req - Incoming request. JSON body:
+ *   - `name` *(required)* — board display name.
+ *   - `type` *(required)* — `"standard"` or `"spray_wall"`.
+ *   - `location` *(required for spray walls)* — physical location description.
+ *   - `description` *(optional)* — free-form description.
+ *
+ * @remarks
+ * The board `id` is derived as a URL-safe slug from the name. If the slug
+ * is already taken, a numeric suffix is appended (e.g. `my-board-2`).
+ *
+ * @returns The created board object with status `201`.
+ *
+ * @returns `400` if `name` is missing, `type` is invalid, or `location`
+ *   is missing for spray walls.
+ * @returns `401` if not authenticated.
+ * @returns `500` on database error.
+ */
 export async function POST(req: NextRequest) {
   try {
     const session = await getIronSession<SessionData>(await cookies(), sessionOptions);

@@ -1,7 +1,42 @@
+/**
+ * Individual tick endpoint — update or delete a tick.
+ *
+ * @module api/ticks/id
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
+/**
+ * Update an existing tick.
+ *
+ * **Authentication:** Required — session cookie or `?token=`. Only the
+ * tick owner may edit it (`403` otherwise).
+ *
+ * @param req - Incoming request. JSON body (all fields optional):
+ *   - `date` — ISO date string (`"YYYY-MM-DD"`).
+ *   - `sent` — whether the climb was completed.
+ *   - `attempts` — number of attempts.
+ *   - `suggestedGrade` — grade opinion (`"V0"`–`"V18"`).
+ *   - `rating` — star rating 1–4.
+ *   - `comment` — free-form notes.
+ *   - `instagramUrl` — Instagram post URL of the send.
+ * @param params - Route params. `id` is the tick UUID.
+ *
+ * @remarks
+ * After updating, `climbs.star_rating` and `climbs.sends` are
+ * recalculated from the full tick set.
+ *
+ * @returns The updated tick row.
+ *
+ * @returns `400` if `rating` is provided and outside 1–4.
+ * @returns `401` if not authenticated.
+ * @returns `403` if the caller does not own the tick.
+ * @returns `404` if the tick does not exist.
+ * @returns `500` on database error.
+ */
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -70,6 +105,26 @@ export async function PATCH(
   }
 }
 
+/**
+ * Delete a tick.
+ *
+ * **Authentication:** Required — session cookie or `?token=`. Only the
+ * tick owner may delete it (`403` otherwise).
+ *
+ * @param req - Incoming request.
+ * @param params - Route params. `id` is the tick UUID.
+ *
+ * @remarks
+ * After deletion, `climbs.star_rating` and `climbs.sends` are
+ * recalculated from the remaining ticks.
+ *
+ * @returns `204 No Content` on success.
+ *
+ * @returns `401` if not authenticated.
+ * @returns `403` if the caller does not own the tick.
+ * @returns `404` if the tick does not exist.
+ * @returns `500` on database error.
+ */
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },

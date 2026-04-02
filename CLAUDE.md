@@ -514,6 +514,7 @@ When adding a new feature, new tests may be added to cover that feature. However
 4. Return `NextResponse.json(data)` or `NextResponse.json(data, { status: 201 })`
 5. Add the `fetch` call in `src/lib/db/remote.ts` using the `/api/...` path
 6. Add the TypeScript type in `src/lib/types.ts` if needed
+7. Add or update JSDoc doc strings on every exported handler function — describe the purpose, auth requirements, key query params or body fields, and possible response codes
 
 ### Route handler template
 ```typescript

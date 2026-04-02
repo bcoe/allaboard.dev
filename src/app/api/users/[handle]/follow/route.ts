@@ -1,7 +1,30 @@
+/**
+ * Follow / unfollow a user, and check follow status.
+ *
+ * @module api/users/handle/follow
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
+/**
+ * Follow a user.
+ *
+ * **Authentication:** Required — session cookie or `?token=`.
+ * A user cannot follow themselves (`400`).
+ *
+ * @param req - Incoming request.
+ * @param params - Route params. `handle` is the user to follow.
+ *
+ * @returns `{ "following": true }` on success.
+ *
+ * @returns `400` if attempting to follow yourself.
+ * @returns `401` if not authenticated.
+ * @returns `404` if the target handle does not exist.
+ * @returns `500` on database error.
+ */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ handle: string }> },
@@ -33,6 +56,21 @@ export async function POST(
   }
 }
 
+/**
+ * Unfollow a user.
+ *
+ * **Authentication:** Required — session cookie or `?token=`.
+ * If the caller was not following the target, the request is a no-op.
+ *
+ * @param req - Incoming request.
+ * @param params - Route params. `handle` is the user to unfollow.
+ *
+ * @returns `{ "following": false }` on success.
+ *
+ * @returns `401` if not authenticated.
+ * @returns `404` if the target handle does not exist.
+ * @returns `500` on database error.
+ */
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ handle: string }> },
@@ -62,7 +100,19 @@ export async function DELETE(
   }
 }
 
-/** GET — check if the current user follows this handle */
+/**
+ * Check whether the authenticated user follows a given handle.
+ *
+ * **Authentication:** Optional. Returns `{ following: false }` when
+ * unauthenticated rather than a 401.
+ *
+ * @param req - Incoming request.
+ * @param params - Route params. `handle` is the user to check.
+ *
+ * @returns `{ "following": true | false }`.
+ *
+ * @returns `500` on database error.
+ */
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ handle: string }> },

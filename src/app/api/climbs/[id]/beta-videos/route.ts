@@ -1,9 +1,39 @@
+/**
+ * Beta videos for a climb — add and remove Instagram video links.
+ *
+ * @module api/climbs/id/beta-videos
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import db from "@/lib/server/db";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 
+/**
+ * Attach an Instagram video URL to a climb as a beta video.
+ *
+ * **Authentication:** Required — session cookie. Only the climb's author
+ * may add beta videos (`403` otherwise).
+ *
+ * @param req - Incoming request. JSON body:
+ *   - `url` *(required)* — full Instagram post or reel URL.
+ * @param params - Route params. `id` is the climb UUID.
+ *
+ * @remarks
+ * The handler attempts to fetch a thumbnail via the Instagram oEmbed API.
+ * If the fetch fails or times out (4 s), the video is still saved with
+ * `thumbnail: null`.
+ *
+ * @returns `{ "url": "...", "thumbnail": "..." }` with status `201`.
+ *
+ * @returns `400` if `url` is missing.
+ * @returns `401` if not authenticated.
+ * @returns `403` if the caller is not the climb author.
+ * @returns `404` if the climb does not exist.
+ * @returns `500` on database error.
+ */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -52,6 +82,23 @@ export async function POST(
   }
 }
 
+/**
+ * Remove a beta video URL from a climb.
+ *
+ * **Authentication:** Required — session cookie. Only the climb's author
+ * may remove beta videos (`403` otherwise).
+ *
+ * @param req - Incoming request. JSON body:
+ *   - `url` *(required)* — the exact URL to remove.
+ * @param params - Route params. `id` is the climb UUID.
+ *
+ * @returns `{ "ok": true }` on success.
+ *
+ * @returns `401` if not authenticated.
+ * @returns `403` if the caller is not the climb author.
+ * @returns `404` if the climb does not exist.
+ * @returns `500` on database error.
+ */
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },

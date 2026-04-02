@@ -1,3 +1,10 @@
+/**
+ * Individual climb endpoint — fetch or update a single climb.
+ *
+ * @module api/climbs/id
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
@@ -23,6 +30,20 @@ function toClimb(row: Record<string, unknown>, videos: Record<string, unknown>[]
   };
 }
 
+/**
+ * Fetch a single climb by ID.
+ *
+ * **Authentication:** Not required — climb details are public.
+ *
+ * @param _req - Incoming request (unused).
+ * @param params - Route params. `id` is the climb UUID.
+ *
+ * @returns The climb object including embedded `betaVideos` (Instagram URLs
+ *   with the handle of the user who submitted each video).
+ *
+ * @returns `404` if the climb does not exist.
+ * @returns `500` on database error.
+ */
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -48,6 +69,29 @@ export async function GET(
   }
 }
 
+/**
+ * Update a climb's metadata.
+ *
+ * **Authentication:** Required — session cookie or `?token=`. Only the
+ * original author of the climb may edit it (`403` otherwise).
+ *
+ * @param req - Incoming request. JSON body (all fields optional):
+ *   - `name` — climb name.
+ *   - `grade` — V-grade string (`"V0"` – `"V18"`).
+ *   - `boardId` — UUID of the board.
+ *   - `angle` — wall angle in degrees.
+ *   - `description` — free-form description / beta.
+ *   - `setter` — route setter name.
+ * @param params - Route params. `id` is the climb UUID.
+ *
+ * @returns The updated climb object.
+ *
+ * @returns `400` if no fields are provided.
+ * @returns `401` if not authenticated.
+ * @returns `403` if the caller is not the climb author.
+ * @returns `404` if the climb does not exist.
+ * @returns `500` on database error.
+ */
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },

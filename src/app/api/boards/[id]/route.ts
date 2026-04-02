@@ -1,8 +1,35 @@
+/**
+ * Individual board endpoint — update a board's metadata.
+ *
+ * @module api/boards/id
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 import { toBoard } from "../route";
 
+/**
+ * Update a board's name, location, or description.
+ *
+ * **Authentication:** Required — session cookie or `?token=`. Only the
+ * user who created the board may edit it (`403` otherwise).
+ *
+ * @param req - Incoming request. JSON body (all fields optional):
+ *   - `name` — new display name.
+ *   - `location` — physical location (spray walls only).
+ *   - `description` — free-form description.
+ * @param params - Route params. `id` is the board slug/id.
+ *
+ * @returns The updated board object.
+ *
+ * @returns `400` if no fields are provided.
+ * @returns `401` if not authenticated.
+ * @returns `403` if the caller did not create the board.
+ * @returns `404` if the board does not exist.
+ * @returns `500` on database error.
+ */
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },

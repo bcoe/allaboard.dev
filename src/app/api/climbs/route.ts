@@ -1,3 +1,10 @@
+/**
+ * Climbs collection endpoint — list and submit climbs.
+ *
+ * @module api/climbs
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import db from "@/lib/server/db";
@@ -25,6 +32,33 @@ function toClimb(row: Record<string, unknown>, videos: Record<string, unknown>[]
   };
 }
 
+/**
+ * List climbs with optional filtering and sorting.
+ *
+ * **Authentication:** Not required — the climb directory is public.
+ *
+ * @param req - Incoming request. Supported query parameters:
+ *   - `q` — case-insensitive name search substring.
+ *   - `gradeMin` — lower bound grade (e.g. `"V4"`); inclusive.
+ *   - `gradeMax` — upper bound grade (e.g. `"V8"`); inclusive.
+ *   - `angleMin` — minimum wall angle (degrees); inclusive.
+ *   - `angleMax` — maximum wall angle (degrees); inclusive.
+ *   - `boardId` — filter to a specific board UUID.
+ *   - `limit` — results per page, max 100 (default 25).
+ *   - `offset` — pagination offset (default 0).
+ *   - `sort` — one of `sends_desc` *(default)*, `star_rating_desc`,
+ *     `grade_asc`, `grade_desc`, `has_video`.
+ *
+ * @returns Paginated response:
+ * ```json
+ * {
+ *   "climbs": [ { "id": "uuid", "name": "The Riddler", "grade": "V5", ... } ],
+ *   "hasMore": true
+ * }
+ * ```
+ *
+ * @returns `500` on database error.
+ */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = req.nextUrl;
@@ -118,6 +152,27 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/**
+ * Submit a new climb to the directory.
+ *
+ * **Authentication:** Required — session cookie or `?token=`.
+ * The authenticated user becomes the `author` of the climb.
+ *
+ * @param req - Incoming request. JSON body:
+ *   - `name` *(required)* — climb name.
+ *   - `grade` *(required)* — V-grade string (`"V0"` – `"V18"`).
+ *   - `boardId` *(required)* — UUID of the board the climb is set on.
+ *   - `angle` *(optional, default 40)* — wall angle in degrees; omitted for spray walls.
+ *   - `description` *(optional)* — free-form description / beta.
+ *   - `setter` *(optional)* — name of the route setter (may differ from author).
+ *
+ * @returns The created climb object with status `201`.
+ *
+ * @returns `400` if `name`, `grade`, or `boardId` are missing, or if `boardId` is invalid.
+ * @returns `401` if not authenticated.
+ * @returns `409` if a climb with the same name, grade, angle, and board already exists.
+ * @returns `500` on database error.
+ */
 export async function POST(req: NextRequest) {
   const userId = await resolveUserId(req);
   if (!userId) {
@@ -180,4 +235,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to create climb" }, { status: 500 });
   }
 }
-

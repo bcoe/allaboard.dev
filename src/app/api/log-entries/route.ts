@@ -1,8 +1,56 @@
+/**
+ * Log entries endpoint — record a climb attempt within a session.
+ *
+ * @module api/log-entries
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
+/**
+ * Log a climb attempt, auto-creating a session for the day if needed.
+ *
+ * **Authentication:** Required — session cookie or `?token=`. The `userId`
+ * in the body must match the authenticated caller (`403` otherwise).
+ *
+ * @param req - Incoming request. JSON body:
+ *   - `userId` *(required)* — owner handle; must match the authenticated caller.
+ *   - `climbId` *(required)* — UUID of the climb being logged.
+ *   - `date` *(required)* — ISO date string (`"YYYY-MM-DD"`).
+ *   - `attempts` *(optional, default 1)* — number of attempts.
+ *   - `sent` *(optional, default false)* — whether the climb was completed.
+ *   - `notes` *(optional)* — free-form text notes.
+ *   - `boardType` *(optional)* — used when auto-creating a session.
+ *   - `angle` *(optional, default 40)* — used when auto-creating a session.
+ *   - `durationMinutes` *(optional, default 60)* — used when auto-creating a session.
+ *   - `feelRating` *(optional, default 3)* — used when auto-creating a session.
+ *
+ * @remarks
+ * If no session exists for the given `userId` + `date`, one is created
+ * automatically using the supplied session fields. Incrementing
+ * `climbs.sends` when `sent` is true happens atomically within this call.
+ *
+ * @returns The created log entry object with status `201`:
+ * ```json
+ * {
+ *   "id": "uuid",
+ *   "sessionId": "uuid",
+ *   "climbId": "uuid",
+ *   "userId": "alex",
+ *   "date": "2026-04-01",
+ *   "attempts": 3,
+ *   "sent": true,
+ *   "notes": "Crux is the second move."
+ * }
+ * ```
+ *
+ * @returns `401` if not authenticated.
+ * @returns `403` if `userId` does not match the authenticated caller.
+ * @returns `500` on database error.
+ */
 export async function POST(req: NextRequest) {
   try {
     const resolvedId = await resolveUserId(req);

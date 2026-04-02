@@ -1,6 +1,48 @@
+/**
+ * Activity feed endpoint — returns the most recent ticks from all users.
+ *
+ * @module api/feed
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/server/db";
 
+/**
+ * Fetch the global activity feed (most recent 50 ticks, newest first).
+ *
+ * **Authentication:** Not required — the feed is public.
+ *
+ * @param req - Incoming request. Accepts the optional `userId` query parameter.
+ *
+ * @remarks
+ * Pass `?userId=<handle>` to exclude that user's own ticks from the feed
+ * (useful for showing the feed on a logged-in user's home page without
+ * surfacing their own activity).
+ *
+ * Each activity object embeds the full user profile and climb details,
+ * including any Instagram beta-video URLs attached to the climb.
+ *
+ * @returns Array of feed activity objects:
+ * ```json
+ * [
+ *   {
+ *     "id": "uuid",
+ *     "date": "2026-04-01T...",
+ *     "sent": true,
+ *     "rating": 3,
+ *     "comment": "Great problem!",
+ *     "suggestedGrade": "V5",
+ *     "instagramUrl": "https://www.instagram.com/reel/...",
+ *     "attempts": 4,
+ *     "user": { "id": "alex", "handle": "alex", "displayName": "Alex", ... },
+ *     "climb": { "id": "uuid", "name": "The Riddler", "grade": "V5", ... }
+ *   }
+ * ]
+ * ```
+ *
+ * @returns `500` on database error.
+ */
 export async function GET(req: NextRequest) {
   try {
     const userId = req.nextUrl.searchParams.get("userId");

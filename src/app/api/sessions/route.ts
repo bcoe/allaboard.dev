@@ -1,3 +1,10 @@
+/**
+ * Climbing sessions endpoint — list and create training sessions.
+ *
+ * @module api/sessions
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import db from "@/lib/server/db";
@@ -21,6 +28,28 @@ async function buildSession(row: Record<string, unknown>) {
   };
 }
 
+/**
+ * List climbing sessions, optionally filtered to a single user.
+ *
+ * **Authentication:** Not required — sessions are public.
+ *
+ * @param req - Incoming request. Accepts optional query param:
+ *   - `userId` — filter sessions to this user handle.
+ *
+ * @returns Array of session objects ordered newest first. Each session
+ *   embeds its `logEntries` array.
+ *
+ * @example
+ * ```bash
+ * # All sessions
+ * curl https://allaboard.dev/api/sessions
+ *
+ * # Sessions for one user
+ * curl "https://allaboard.dev/api/sessions?userId=alex"
+ * ```
+ *
+ * @returns `500` on database error.
+ */
 export async function GET(req: NextRequest) {
   try {
     const userId = req.nextUrl.searchParams.get("userId");
@@ -35,6 +64,26 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/**
+ * Create a new climbing session.
+ *
+ * **Authentication:** Required — session cookie or `?token=`. The `userId`
+ * in the request body must match the authenticated user (`403` otherwise).
+ *
+ * @param req - Incoming request. JSON body:
+ *   - `userId` *(required)* — owner handle; must match the authenticated caller.
+ *   - `date` *(required)* — ISO date string (`"YYYY-MM-DD"`).
+ *   - `boardType` *(optional)* — board name string.
+ *   - `angle` *(optional, default 40)* — wall angle in degrees.
+ *   - `durationMinutes` *(optional, default 60)* — session length.
+ *   - `feelRating` *(optional, default 3)* — subjective feel score 1–5.
+ *
+ * @returns The created session object with status `201`.
+ *
+ * @returns `401` if not authenticated.
+ * @returns `403` if `userId` does not match the authenticated caller.
+ * @returns `500` on database error.
+ */
 export async function POST(req: NextRequest) {
   try {
     const resolvedId = await resolveUserId(req);

@@ -1,6 +1,32 @@
+/**
+ * Ticks collection endpoint — list all ticks for a user.
+ *
+ * @module api/ticks
+ * @packageDocumentation
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/server/db";
 
+/**
+ * List all ticks submitted by a specific user, newest first.
+ *
+ * **Authentication:** Not required — tick history is public.
+ *
+ * @param req - Incoming request. Required query parameter:
+ *   - `userId` *(required)* — the user handle to fetch ticks for.
+ *
+ * @returns Array of tick objects, each including embedded climb name,
+ *   grade, board name, and angle.
+ *
+ * @example
+ * ```bash
+ * curl "https://allaboard.dev/api/ticks?userId=alex"
+ * ```
+ *
+ * @returns `400` if `userId` is not provided.
+ * @returns `500` on database error.
+ */
 export async function GET(req: NextRequest) {
   try {
     const userId = req.nextUrl.searchParams.get("userId");
