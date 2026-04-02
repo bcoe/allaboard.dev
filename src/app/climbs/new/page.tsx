@@ -14,6 +14,7 @@ export default function NewClimbPage() {
 
   const [boards, setBoards]           = useState<Board[]>([]);
   const [boardId, setBoardId]         = useState<string>("");
+  const selectedBoard                  = boards.find((b) => b.id === boardId);
   const [submitting, setSubmitting]   = useState(false);
   const [error, setError]             = useState("");
 
@@ -45,11 +46,12 @@ export default function NewClimbPage() {
     const fd = new FormData(e.currentTarget);
 
     try {
+      const isSprayWall = selectedBoard?.type === "spray_wall";
       const climb = await createClimb({
         name:        (fd.get("name") as string).trim(),
         grade:       fd.get("grade") as Grade,
         boardId,
-        angle:       fd.get("angle") ? Number(fd.get("angle")) : 40,
+        angle:       isSprayWall ? undefined : (fd.get("angle") ? Number(fd.get("angle")) : 40),
         description: (fd.get("description") as string).trim(),
         setter:      (fd.get("setter") as string).trim() || undefined,
       });
@@ -101,7 +103,7 @@ export default function NewClimbPage() {
         </div>
 
         {/* Grade + Angle */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className={selectedBoard?.type === "spray_wall" ? "" : "grid grid-cols-2 gap-4"}>
           <div>
             <label className="block text-sm font-medium text-stone-300 mb-1.5">
               Grade <span className="text-red-400">*</span>
@@ -117,19 +119,21 @@ export default function NewClimbPage() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-stone-300 mb-1.5">
-              Angle (degrees)
-            </label>
-            <input
-              type="number"
-              name="angle"
-              min={0}
-              max={90}
-              defaultValue={40}
-              className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-white placeholder:text-stone-500 focus:outline-none focus:border-orange-500 transition-colors"
-            />
-          </div>
+          {selectedBoard?.type !== "spray_wall" && (
+            <div>
+              <label className="block text-sm font-medium text-stone-300 mb-1.5">
+                Angle (degrees)
+              </label>
+              <input
+                type="number"
+                name="angle"
+                min={0}
+                max={90}
+                defaultValue={40}
+                className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-white placeholder:text-stone-500 focus:outline-none focus:border-orange-500 transition-colors"
+              />
+            </div>
+          )}
         </div>
 
         {/* Board */}

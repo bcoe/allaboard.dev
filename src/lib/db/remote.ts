@@ -3,7 +3,7 @@
  * Credentials are included on every request so the auth session cookie is sent.
  */
 
-import { Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity } from "@/lib/types";
+import { Board, Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity } from "@/lib/types";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -148,6 +148,29 @@ export async function followUser(handle: string): Promise<void> {
 
 export async function unfollowUser(handle: string): Promise<void> {
   await api<{ following: boolean }>(`/users/${encodeURIComponent(handle)}/follow`, { method: "DELETE" });
+}
+
+// ─── Boards ───────────────────────────────────────────────────────────────────
+
+export async function getBoards(type?: "standard" | "spray_wall"): Promise<Board[]> {
+  const qs = type ? `?type=${type}` : "";
+  return api<Board[]>(`/boards${qs}`);
+}
+
+export async function createBoard(data: {
+  name: string;
+  type: "standard" | "spray_wall";
+  location?: string;
+  description?: string;
+}): Promise<Board> {
+  return api<Board>("/boards", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function updateBoard(
+  id: string,
+  patch: { name?: string; location?: string; description?: string },
+): Promise<Board> {
+  return api<Board>(`/boards/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────

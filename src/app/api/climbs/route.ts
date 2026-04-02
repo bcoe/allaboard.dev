@@ -13,7 +13,7 @@ function toClimb(row: Record<string, unknown>, videos: Record<string, unknown>[]
     grade:       row.grade,
     boardId:     row.board_id,
     boardName:   row.board_name ?? null,
-    angle:       row.angle ?? 40,
+    angle:       row.angle ?? undefined,
     description: row.description,
     author:      row.author,
     setter:      row.setter ?? undefined,
@@ -144,12 +144,13 @@ export async function POST(req: NextRequest) {
     const board = await db("boards").where({ id: boardId }).first();
     if (!board) return NextResponse.json({ error: "Invalid board" }, { status: 400 });
 
-    const resolvedAngle = angle ?? 40;
+    const isSprayWall = board.type === "spray_wall";
+    const resolvedAngle = isSprayWall ? null : (angle ?? 40);
 
     // Check uniqueness before insert for a friendly error
-    const duplicate = await db("climbs")
-      .where({ name: name.trim(), grade, board_id: boardId, angle: resolvedAngle })
-      .first();
+    const dupQuery = db("climbs").where({ name: name.trim(), grade, board_id: boardId });
+    if (resolvedAngle !== null) dupQuery.where({ angle: resolvedAngle });
+    const duplicate = await dupQuery.first();
     if (duplicate) {
       return NextResponse.json(
         { error: "A climb with this name, grade, angle and board already exists" },

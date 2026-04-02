@@ -20,6 +20,7 @@ export default function ClimbsPage() {
   const [loading, setLoading]     = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore]     = useState(false);
+  const [boardsLoaded, setBoardsLoaded] = useState(false);
   const offsetRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const defaultApplied = useRef(false);
@@ -55,8 +56,9 @@ export default function ClimbsPage() {
           if (match) setBoardId(match.id);
           defaultApplied.current = true;
         }
+        setBoardsLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => { setBoardsLoaded(true); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -72,8 +74,9 @@ export default function ClimbsPage() {
     return f;
   }
 
-  // Reset and reload when filters change
+  // Reset and reload when filters change — wait until boards (and default boardId) are set
   useEffect(() => {
+    if (!boardsLoaded) return;
     setLoading(true);
     offsetRef.current = 0;
     getClimbs(buildFilters(0))
@@ -85,7 +88,7 @@ export default function ClimbsPage() {
       .catch(() => { setClimbs([]); setHasMore(false); })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, gradeMin, gradeMax, boardId, angleMin, angleMax, sort]);
+  }, [query, gradeMin, gradeMax, boardId, angleMin, angleMax, sort, boardsLoaded]);
 
   // Load next page
   const loadMore = useCallback(() => {

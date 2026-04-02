@@ -10,6 +10,7 @@ import UserAvatar from "./UserAvatar";
 const NAV_ITEMS = [
   { label: "Feed",   href: "/" },
   { label: "Climbs", href: "/climbs" },
+  { label: "Boards", href: "/boards" },
 ];
 
 export default function Navbar() {
