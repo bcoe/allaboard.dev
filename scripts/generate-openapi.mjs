@@ -350,8 +350,9 @@ function generate() {
       description: 'REST API for the Allaboard board-climbing community platform.',
     },
     servers: [
-      { url: 'https://allaboard.dev',   description: 'Production' },
-      { url: 'http://localhost:3000',    description: 'Local development' },
+      { url: 'https://www.allaboard.dev', description: 'Production (www)' },
+      { url: 'https://allaboard.dev',     description: 'Production (apex)' },
+      { url: 'http://localhost:3000',     description: 'Local development' },
     ],
     components: {
       securitySchemes: {

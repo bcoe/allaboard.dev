@@ -47,6 +47,10 @@ export default function ScalarClient() {
           url: "/openapi.yaml",
           theme: "default",
           layout: "modern",
+          // Always send test requests to the same origin the user is on.
+          // This means both allaboard.dev and www.allaboard.dev work without
+          // hitting cross-origin CORS restrictions.
+          baseServerURL: window.location.origin,
           defaultHttpClient: {
             targetKey: "shell",
             clientKey: "curl",
