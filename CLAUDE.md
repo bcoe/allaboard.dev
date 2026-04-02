@@ -433,6 +433,51 @@ interface FeedActivity { id, user, climb, date, attempts, sent, notes }
 
 ---
 
+## Penetration Testing
+
+### How to run a pen test
+
+The dev server must be running (`npm run dev`). Tests are made with `curl` against `http://localhost:3000`.
+
+**ACL rules to verify for every protected endpoint:**
+1. Unauthenticated request (no cookie) → must return **401**
+2. Authenticated request by a non-owner → must return **403**
+3. Authenticated request by the owner → must succeed (**200/201**)
+
+**Quick unauthenticated check pattern:**
+```bash
+# Should return 401
+curl -s -o /dev/null -w "%{http_code}" -X PATCH http://localhost:3000/api/users/somehandle \
+  -H "Content-Type: application/json" -d '{"bio":"hacked"}'
+```
+
+**Protected resources and their owner columns:**
+| Resource | Mutation endpoints | Owner check |
+|---|---|---|
+| `users` | `PATCH /api/users/[handle]` | `session.userId === handle` |
+| `climbs` | `PATCH /api/climbs/[id]` | `session.userId === climb.author` |
+| `ticks` | `PATCH /api/ticks/[id]`, `DELETE /api/ticks/[id]` | `session.userId === tick.user_id` |
+| `sessions` | `POST /api/sessions` | `session.userId === body.userId` |
+| `log_entries` | `POST /api/log-entries` | `session.userId === body.userId` |
+| `boards` | `PATCH /api/boards/[id]` | `session.userId === board.created_by` |
+| `follows` | `POST/DELETE /api/users/[handle]/follow` | `session.userId` must be set (follower is always the caller) |
+
+### Important: clean up after testing
+
+Live tests against the dev server write real data. After a pen test:
+- Delete any spurious rows created (sessions, log_entries, ticks) via direct DB query or the UI
+- Restore any fields that were overwritten (bio, displayName, etc.)
+- Use a throwaway test user where possible to avoid corrupting real data
+
+### When to run a pen test
+
+Run a pen test after any of the following:
+- A new API endpoint is added
+- An existing endpoint gains a new mutation method (POST/PATCH/DELETE)
+- Auth or session logic changes
+
+---
+
 ## Testing Policy
 
 When adding a new feature, new tests may be added to cover that feature. However, **do not modify existing tests** as part of a feature or bug-fix prompt — existing tests serve as a regression baseline and should remain unchanged unless explicitly instructed to update them. Test updates should be requested in a separate, subsequent prompt from the one that introduced the feature or change.

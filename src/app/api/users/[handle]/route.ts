@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getIronSession } from "iron-session";
+import { cookies } from "next/headers";
 import db from "@/lib/server/db";
+import { sessionOptions, type SessionData } from "@/lib/server/session";
 import { toUser } from "../route";
 
 export async function GET(
@@ -22,7 +25,12 @@ export async function PATCH(
   { params }: { params: Promise<{ handle: string }> },
 ) {
   try {
+    const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+    if (!session.userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+
     const { handle } = await params;
+    if (session.userId !== handle) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
     const { displayName, bio, homeBoard, homeBoardAngle, personalBests } =
       await req.json() as Record<string, unknown>;
 

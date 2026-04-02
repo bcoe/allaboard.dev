@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import { getIronSession } from "iron-session";
+import { cookies } from "next/headers";
 import db from "@/lib/server/db";
+import { sessionOptions, type SessionData } from "@/lib/server/session";
 
 export async function POST(req: NextRequest) {
   try {
+    const ironSession = await getIronSession<SessionData>(await cookies(), sessionOptions);
+    if (!ironSession.userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+
     const { userId, climbId, date, attempts, sent, notes, boardType, angle, durationMinutes, feelRating } =
       await req.json() as Record<string, unknown>;
+
+    if (userId !== ironSession.userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     // Find or create a session for this user+date
     let session = await db("sessions").where({ user_id: userId, date }).first();
