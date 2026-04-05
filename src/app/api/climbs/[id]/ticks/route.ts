@@ -7,10 +7,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import { getIronSession } from "iron-session";
-import { cookies } from "next/headers";
 import db from "@/lib/server/db";
-import { sessionOptions, type SessionData } from "@/lib/server/session";
+import { resolveUserId } from "@/lib/server/resolveUserId";
 
 /**
  * List all ticks for a climb, newest first.
@@ -95,8 +93,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (!session.userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  const userId = await resolveUserId(req);
+  if (!userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
 
   try {
     const { id } = await params;
@@ -135,7 +133,7 @@ export async function POST(
     await db("ticks").insert({
       id:              tickId,
       climb_id:        id,
-      user_id:         session.userId,
+      user_id:         userId,
       date:            tickTimestamp,
       suggested_grade: suggestedGrade ?? null,
       rating,
