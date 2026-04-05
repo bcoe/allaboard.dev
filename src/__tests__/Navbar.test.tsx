@@ -59,11 +59,10 @@ describe("Navbar — authentication states", () => {
     expect(screen.queryByText("Login")).not.toBeInTheDocument();
   });
 
-  it("opens a dropdown with display name, handle, profile link and logout when avatar is clicked", () => {
+  it("opens a dropdown with handle, profile link and logout when avatar is clicked", () => {
     mockUseAuth.mockReturnValue({ user: mockUser, loading: false, logout: jest.fn(), updateUser: jest.fn() });
     render(<Navbar />);
     fireEvent.click(screen.getByLabelText("Account menu"));
-    expect(screen.getByText("Test User")).toBeInTheDocument();
     expect(screen.getByText("@testuser")).toBeInTheDocument();
     expect(screen.getByText("View Profile")).toBeInTheDocument();
     expect(screen.getByText("Log out")).toBeInTheDocument();

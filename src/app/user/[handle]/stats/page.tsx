@@ -117,7 +117,7 @@ function allDatesInRange(dateFrom: string, dateTo: string): string[] {
   return dates;
 }
 
-function buildHeatmapOption(ticks: UserTick[], dateFrom: string, dateTo: string): EChartsOption {
+function buildHeatmapOption(ticks: UserTick[], dateFrom: string, dateTo: string, isMobile = false): EChartsOption {
   const countMap = new Map<string, number>();
   const ticksByCell = new Map<string, UserTick[]>();
   for (const tick of ticks) {
@@ -161,18 +161,18 @@ function buildHeatmapOption(ticks: UserTick[], dateFrom: string, dateTo: string)
       padding: 0,
       extraCssText: "box-shadow:none",
     },
-    grid: { left: 50, right: 15, top: 15, bottom: 70 },
+    grid: { left: isMobile ? 38 : 50, right: 10, top: 15, bottom: isMobile ? 48 : 70 },
     xAxis: {
       type: "category",
       data: dates,
-      axisLabel: { color: "#a8a29e", fontSize: 10, rotate: 45, interval: "auto" },
+      axisLabel: { color: "#a8a29e", fontSize: isMobile ? 9 : 10, rotate: 45, interval: "auto" },
       axisLine: { lineStyle: { color: "#44403c" } },
       splitLine: { show: false },
     },
     yAxis: {
       type: "category",
       data: grades,
-      axisLabel: { color: "#a8a29e", fontSize: 10 },
+      axisLabel: { color: "#a8a29e", fontSize: isMobile ? 9 : 10 },
       axisLine: { lineStyle: { color: "#44403c" } },
       splitLine: { show: false },
     },
@@ -293,9 +293,9 @@ function toDateString(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function defaultDateFrom(): string {
+function defaultDateFrom(months: number): string {
   const d = new Date();
-  d.setMonth(d.getMonth() - 3);
+  d.setMonth(d.getMonth() - months);
   return toDateString(d);
 }
 
@@ -305,8 +305,13 @@ interface ChartFilter {
   boards: string[];
 }
 
-function makeDefaultFilter(): ChartFilter {
-  return { dateFrom: defaultDateFrom(), dateTo: toDateString(new Date()), boards: [] };
+function makeDefaultFilter(months: number): ChartFilter {
+  return { dateFrom: defaultDateFrom(months), dateTo: toDateString(new Date()), boards: [] };
+}
+
+/** True when called in a browser with a narrow viewport (Tailwind `sm` breakpoint). */
+function isMobileScreen(): boolean {
+  return typeof window !== "undefined" && window.innerWidth < 640;
 }
 
 function applyFilter(ticks: UserTick[], filter: ChartFilter): UserTick[] {
@@ -467,9 +472,16 @@ export default function UserStatsPage() {
   const { handle } = useParams<{ handle: string }>();
 
   const [ticks, setTicks] = useState<UserTick[]>([]);
-  const [heatmapFilter, setHeatmapFilter] = useState<ChartFilter>(makeDefaultFilter);
-  const [pyramidFilter, setPyramidFilter] = useState<ChartFilter>(makeDefaultFilter);
+  const [isMobile, setIsMobile] = useState(isMobileScreen);
+  const [heatmapFilter, setHeatmapFilter] = useState<ChartFilter>(() => makeDefaultFilter(isMobileScreen() ? 1 : 3));
+  const [pyramidFilter, setPyramidFilter] = useState<ChartFilter>(() => makeDefaultFilter(isMobileScreen() ? 1 : 3));
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    function onResize() { setIsMobile(window.innerWidth < 640); }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     if (!handle) return;
@@ -490,15 +502,17 @@ export default function UserStatsPage() {
   const pyramidTicks = useMemo(() => applyFilter(ticks, pyramidFilter), [ticks, pyramidFilter]);
 
   const heatmapOption = useMemo(
-    () => buildHeatmapOption(heatmapTicks, heatmapFilter.dateFrom, heatmapFilter.dateTo),
-    [heatmapTicks, heatmapFilter.dateFrom, heatmapFilter.dateTo],
+    () => buildHeatmapOption(heatmapTicks, heatmapFilter.dateFrom, heatmapFilter.dateTo, isMobile),
+    [heatmapTicks, heatmapFilter.dateFrom, heatmapFilter.dateTo, isMobile],
   );
   const pyramidOption = useMemo(() => buildPyramidOption(pyramidTicks), [pyramidTicks]);
 
+  const rowHeight    = isMobile ? 26 : 38;
+  const heatmapHeight = isMobile ? 220 : 360;
   const pyramidHeight = useMemo(() => {
     const sent = new Set(pyramidTicks.filter((t) => t.sent).map((t) => t.grade));
-    return Math.max(160, sent.size * 38 + 40);
-  }, [pyramidTicks]);
+    return Math.max(isMobile ? 120 : 160, sent.size * rowHeight + (isMobile ? 30 : 40));
+  }, [pyramidTicks, isMobile, rowHeight]);
 
   const totalSends    = useMemo(() => ticks.filter((t) => t.sent).length, [ticks]);
   const longestStreak = useMemo(() => computeLongestStreak(ticks), [ticks]);
@@ -536,7 +550,7 @@ export default function UserStatsPage() {
             <p className="text-stone-500 text-sm mb-3">More, more!</p>
             <ChartFilters allBoards={allBoards} filter={heatmapFilter} onChange={setHeatmapFilter} />
             <div className="bg-stone-900 border border-stone-700 rounded-xl p-5">
-              <EChart option={heatmapOption} height={360} />
+              <EChart option={heatmapOption} height={heatmapHeight} />
             </div>
           </section>
 
