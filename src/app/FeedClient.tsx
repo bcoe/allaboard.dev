@@ -15,7 +15,7 @@ const PAGE_SIZE = 25;
 type FeedTab = "all" | "following";
 
 export default function FeedClient() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [tab, setTab]             = useState<FeedTab>("following");
   const [activities, setActivities] = useState<FeedActivity[]>([]);
   const [hasMore, setHasMore]     = useState(false);
@@ -37,10 +37,11 @@ export default function FeedClient() {
     }
   }, [user]);
 
-  // Reload when tab or page changes.
+  // Reload when tab or page changes — but wait for auth to resolve first.
   useEffect(() => {
+    if (authLoading) return;
     void fetchPage(tab, page);
-  }, [tab, page, fetchPage]);
+  }, [tab, page, fetchPage, authLoading]);
 
   // Reset to page 1 when the tab changes.
   function switchTab(next: FeedTab) {
@@ -49,9 +50,10 @@ export default function FeedClient() {
   }
 
   // Reset to "all" if the user logs out while on the "following" tab.
+  // Only act after auth has resolved — not during the initial loading state.
   useEffect(() => {
-    if (!user && tab === "following") switchTab("all");
-  }, [user, tab]);
+    if (!authLoading && !user && tab === "following") switchTab("all");
+  }, [authLoading, user, tab]);
 
   return (
     <>
