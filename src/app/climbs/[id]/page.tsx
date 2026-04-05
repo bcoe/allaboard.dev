@@ -10,6 +10,7 @@ import { timeAgo } from "@/lib/utils";
 import GradeBadge from "@/components/GradeBadge";
 import StarRating from "@/components/StarRating";
 import TickModal from "@/components/TickModal";
+import ClimbEditModal from "@/components/ClimbEditModal";
 import UserAvatar from "@/components/UserAvatar";
 
 export default function ClimbPage() {
@@ -18,7 +19,8 @@ export default function ClimbPage() {
   const [climb, setClimb]         = useState<Climb | null>(null);
   const [ticks, setTicks]         = useState<ClimbTick[]>([]);
   const [notFound, setNotFound]   = useState(false);
-  const [tickModal, setTickModal] = useState(false);
+  const [tickModal, setTickModal]   = useState(false);
+  const [editModal, setEditModal]   = useState(false);
 
   const isOwner = !!(user && climb && user.id === climb.author);
 
@@ -61,6 +63,13 @@ export default function ClimbPage() {
           onSuccess={() => { void loadClimb(); void loadTicks(); }}
         />
       )}
+      {editModal && (
+        <ClimbEditModal
+          climb={climb}
+          onClose={() => setEditModal(false)}
+          onSuccess={(updated) => { setClimb(updated); setEditModal(false); }}
+        />
+      )}
 
       <div className="max-w-2xl mx-auto pb-12">
         <div className="flex items-center justify-between mb-6">
@@ -77,12 +86,12 @@ export default function ClimbPage() {
               </button>
             )}
             {isOwner && (
-              <Link
-                href={`/climbs/${id}/edit`}
+              <button
+                onClick={() => setEditModal(true)}
                 className="text-sm text-stone-400 hover:text-white border border-stone-700 hover:border-stone-500 px-3 py-1.5 rounded-lg transition-colors"
               >
                 Edit climb
-              </Link>
+              </button>
             )}
           </div>
         </div>

@@ -56,6 +56,7 @@ function makeTick(overrides: Partial<UserTick> = {}): UserTick {
     rating: 3,
     comment: "",
     date: "2026-01-15",
+    createdAt: "2026-01-15T00:00:00.000Z",
     ...overrides,
   };
 }

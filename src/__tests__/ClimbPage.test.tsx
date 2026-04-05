@@ -1,12 +1,12 @@
 /**
  * Frontend ACL tests for /climbs/[id]
  *
- * Climbs are a protected resource. The "Edit climb" link must only be visible
+ * Climbs are a protected resource. The "Edit climb" button must only be visible
  * to the climb's author (climb.author === user.id). These tests will FAIL if
  * the owner check is removed or the edit control is shown to everyone.
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import ClimbPage from "@/app/climbs/[id]/page";
 import { useAuth } from "@/lib/auth-context";
 import { getClimbById, getClimbTicks } from "@/lib/db";
@@ -19,7 +19,16 @@ jest.mock("@/lib/db");
 jest.mock("next/navigation", () => ({
   useParams: jest.fn().mockReturnValue({ id: "climb-1" }),
 }));
-jest.mock("@/components/TickModal",   () => ({ __esModule: true, default: () => null }));
+jest.mock("@/components/TickModal",      () => ({ __esModule: true, default: () => null }));
+jest.mock("@/components/ClimbEditModal", () => ({
+  __esModule: true,
+  default: ({ climb, onClose }: { climb: Climb; onClose: () => void }) => (
+    <div data-testid="climb-edit-modal">
+      <span>Edit Climb Modal — {climb.name}</span>
+      <button onClick={onClose}>Close</button>
+    </div>
+  ),
+}));
 jest.mock("@/components/GradeBadge", () => ({
   __esModule: true,
   default: ({ grade }: { grade: string }) => <span>{grade}</span>,
@@ -100,10 +109,41 @@ describe("ClimbPage — ownership-gated UI", () => {
     expect(screen.getByText("Edit climb")).toBeInTheDocument();
   });
 
-  it("'Edit climb' links to the correct edit page", async () => {
+  it("'Edit climb' is a button (not a navigation link)", async () => {
     mockUseAuth.mockReturnValue({ user: alice, loading: false, logout: jest.fn(), updateUser: jest.fn() });
     render(<ClimbPage />);
     await screen.findByText("Test Problem");
-    expect(screen.getByText("Edit climb").closest("a")).toHaveAttribute("href", "/climbs/climb-1/edit");
+    const btn = screen.getByText("Edit climb");
+    expect(btn.tagName).toBe("BUTTON");
+    expect(btn.closest("a")).toBeNull();
+  });
+});
+
+describe("ClimbPage — edit modal", () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({ user: alice, loading: false, logout: jest.fn(), updateUser: jest.fn() });
+  });
+
+  it("does not show the edit modal before 'Edit climb' is clicked", async () => {
+    render(<ClimbPage />);
+    await screen.findByText("Test Problem");
+    expect(screen.queryByTestId("climb-edit-modal")).not.toBeInTheDocument();
+  });
+
+  it("opens the edit modal when the author clicks 'Edit climb'", async () => {
+    render(<ClimbPage />);
+    await screen.findByText("Test Problem");
+    fireEvent.click(screen.getByText("Edit climb"));
+    expect(screen.getByTestId("climb-edit-modal")).toBeInTheDocument();
+    expect(screen.getByText("Edit Climb Modal — Test Problem")).toBeInTheDocument();
+  });
+
+  it("closes the edit modal when onClose is called", async () => {
+    render(<ClimbPage />);
+    await screen.findByText("Test Problem");
+    fireEvent.click(screen.getByText("Edit climb"));
+    expect(screen.getByTestId("climb-edit-modal")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Close"));
+    expect(screen.queryByTestId("climb-edit-modal")).not.toBeInTheDocument();
   });
 });
