@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { FeedActivity } from "@/lib/types";
 import { getFeedActivities } from "@/lib/db";
 import { useAuth } from "@/lib/auth-context";
@@ -18,76 +18,57 @@ export default function FeedClient() {
   const { user } = useAuth();
   const [tab, setTab]             = useState<FeedTab>("following");
   const [activities, setActivities] = useState<FeedActivity[]>([]);
-  const [hasMore, setHasMore]     = useState(true);
-  const [initialLoading, setInitialLoading] = useState(true);
+  const [hasMore, setHasMore]     = useState(false);
+  const [page, setPage]           = useState(1);
+  const [loading, setLoading]     = useState(true);
 
-  // Ref-based lock prevents concurrent / duplicate fetches.
-  const loadingRef = useRef(false);
-  const offsetRef  = useRef(0);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  const fetchPage = useCallback(async (tab: FeedTab, offset: number, replace: boolean) => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
+  const fetchPage = useCallback(async (tab: FeedTab, page: number) => {
+    setLoading(true);
     try {
       const followingOf = tab === "following" && user ? user.id : undefined;
-      const { activities: page, hasMore } = await getFeedActivities(followingOf, { limit: PAGE_SIZE, offset });
-      setActivities((prev) => replace ? page : [...prev, ...page]);
+      const { activities, hasMore } = await getFeedActivities(followingOf, {
+        limit:  PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
+      });
+      setActivities(activities);
       setHasMore(hasMore);
-      offsetRef.current = offset + page.length;
     } finally {
-      loadingRef.current = false;
-      if (replace) setInitialLoading(false);
+      setLoading(false);
     }
   }, [user]);
 
-  // Reset and reload when tab changes.
+  // Reload when tab or page changes.
   useEffect(() => {
-    offsetRef.current = 0;
-    loadingRef.current = false;
-    setActivities([]);
-    setHasMore(true);
-    setInitialLoading(true);
-    void fetchPage(tab, 0, true);
-  }, [tab, fetchPage]);
+    void fetchPage(tab, page);
+  }, [tab, page, fetchPage]);
+
+  // Reset to page 1 when the tab changes.
+  function switchTab(next: FeedTab) {
+    setTab(next);
+    setPage(1);
+  }
 
   // Reset to "all" if the user logs out while on the "following" tab.
   useEffect(() => {
-    if (!user && tab === "following") setTab("all");
+    if (!user && tab === "following") switchTab("all");
   }, [user, tab]);
-
-  // IntersectionObserver watches the sentinel div at the bottom of the list.
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
-          void fetchPage(tab, offsetRef.current, false);
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [tab, hasMore, fetchPage]);
 
   return (
     <>
       <div className="flex items-center justify-between mb-6">
         <div className="flex gap-1">
-          <TabButton active={tab === "all"} onClick={() => setTab("all")}>
+          <TabButton active={tab === "all"} onClick={() => switchTab("all")}>
             All Activity
           </TabButton>
           {user && (
-            <TabButton active={tab === "following"} onClick={() => setTab("following")}>
+            <TabButton active={tab === "following"} onClick={() => switchTab("following")}>
               Following
             </TabButton>
           )}
         </div>
       </div>
 
-      {initialLoading ? (
+      {loading ? (
         <p className="text-stone-500 text-center py-16">Loading…</p>
       ) : activities.length === 0 ? (
         <p className="text-stone-500 text-center py-16">No activity yet.</p>
@@ -99,12 +80,33 @@ export default function FeedClient() {
         </div>
       )}
 
-      {/* Sentinel — IntersectionObserver target; also shows a subtle loading indicator */}
-      <div ref={sentinelRef} className="py-6 flex justify-center">
-        {!initialLoading && hasMore && (
-          <span className="text-stone-600 text-xs">Loading more…</span>
-        )}
-      </div>
+      {!loading && (page > 1 || hasMore) && (
+        <div className="flex items-center justify-center gap-3 mt-6">
+          <button
+            onClick={() => setPage((p) => p - 1)}
+            disabled={page === 1}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-stone-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            aria-label="Previous page"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M10 3L5 8l5 5" />
+            </svg>
+            Prev
+          </button>
+          <span className="text-stone-500 text-sm">{page}</span>
+          <button
+            onClick={() => setPage((p) => p + 1)}
+            disabled={!hasMore}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-stone-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            aria-label="Next page"
+          >
+            Next
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M6 3l5 5-5 5" />
+            </svg>
+          </button>
+        </div>
+      )}
     </>
   );
 }
