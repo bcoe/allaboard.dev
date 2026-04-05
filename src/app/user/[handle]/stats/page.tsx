@@ -384,6 +384,23 @@ function makeDefaultFilter(months: number): ChartFilter {
   return { dateFrom: defaultDateFrom(months), dateTo: localDateStr(new Date()), boards: [] };
 }
 
+const MAX_CHART_YEARS = 3;
+
+/**
+ * Clamp a proposed dateFrom so the range [dateFrom, dateTo] is at most
+ * MAX_CHART_YEARS years.  Rendering every day in a multi-decade range as
+ * heatmap categories will crash the browser.
+ */
+function clampDateFrom(dateFrom: string, dateTo: string): string {
+  if (!dateFrom || !dateTo) return dateFrom;
+  const minFrom = new Date(dateTo + "T00:00:00");
+  minFrom.setFullYear(minFrom.getFullYear() - MAX_CHART_YEARS);
+  const minFromStr = localDateStr(minFrom);
+  // If dateFrom is after dateTo (invalid range), reset to the earliest valid date.
+  if (dateFrom > dateTo) return minFromStr;
+  return dateFrom < minFromStr ? minFromStr : dateFrom;
+}
+
 /** True when called in a browser with a narrow viewport (Tailwind `sm` breakpoint). */
 function isMobileScreen(): boolean {
   return typeof window !== "undefined" && window.innerWidth < 640;
@@ -483,13 +500,22 @@ function ChartFilters({
   filter: ChartFilter;
   onChange: (f: ChartFilter) => void;
 }) {
+  const earliestAllowed = (() => {
+    const d = new Date(filter.dateTo + "T00:00:00");
+    d.setFullYear(d.getFullYear() - MAX_CHART_YEARS);
+    return localDateStr(d);
+  })();
+
   return (
     <div className="flex flex-wrap items-center gap-2 mb-4">
       <input
         type="date"
         value={filter.dateFrom}
+        min={earliestAllowed}
         max={filter.dateTo}
-        onChange={(e) => onChange({ ...filter, dateFrom: e.target.value })}
+        onChange={(e) =>
+          onChange({ ...filter, dateFrom: clampDateFrom(e.target.value, filter.dateTo) })
+        }
         className="bg-stone-800 border border-stone-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
       />
       <span className="text-stone-500 text-sm">to</span>
@@ -498,7 +524,9 @@ function ChartFilters({
         value={filter.dateTo}
         min={filter.dateFrom}
         max={localDateStr(new Date())}
-        onChange={(e) => onChange({ ...filter, dateTo: e.target.value })}
+        onChange={(e) =>
+          onChange({ ...filter, dateTo: e.target.value, dateFrom: clampDateFrom(filter.dateFrom, e.target.value) })
+        }
         className="bg-stone-800 border border-stone-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
       />
       {allBoards.length > 0 && (

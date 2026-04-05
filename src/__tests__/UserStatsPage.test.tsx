@@ -11,7 +11,7 @@
  * - computeLongestStreak logic via the rendered streak tile
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import UserStatsPage from "@/app/user/[handle]/stats/page";
 import { getUserTicks } from "@/lib/db";
 import type { UserTick } from "@/lib/types";
@@ -222,5 +222,97 @@ describe("UserStatsPage — board selector", () => {
     render(<UserStatsPage />);
     await screen.findByText("Detailed Stats for @alice");
     expect(mockGetUserTicks).toHaveBeenCalledWith("alice");
+  });
+});
+
+// ── Date range clamping ───────────────────────────────────────────────────────
+
+describe("UserStatsPage — date range clamping (max 3 years)", () => {
+  /** Compute the earliest allowed dateFrom given a dateTo string. */
+  function minDateFrom(dateTo: string): string {
+    const d = new Date(dateTo + "T00:00:00");
+    d.setFullYear(d.getFullYear() - 3);
+    return [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, "0"),
+      String(d.getDate()).padStart(2, "0"),
+    ].join("-");
+  }
+
+  beforeEach(() => {
+    mockGetUserTicks.mockResolvedValue([makeTick()]);
+  });
+
+  it("clamps dateFrom to 3 years before dateTo when a far-past date is typed", async () => {
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    // First two date inputs belong to the Sends (heatmap) chart.
+    const [dateFromInput, dateToInput] = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/);
+    const dateTo = (dateToInput as HTMLInputElement).value;
+
+    fireEvent.change(dateFromInput, { target: { value: "1990-01-01" } });
+
+    expect((dateFromInput as HTMLInputElement).value).toBe(minDateFrom(dateTo));
+  });
+
+  it("does not clamp dateFrom when it is within the 3-year window", async () => {
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    const [dateFromInput, dateToInput] = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/);
+    const dateTo = (dateToInput as HTMLInputElement).value;
+
+    // 1 year ago — well within the 3-year limit.
+    const oneYearAgo = (() => {
+      const d = new Date(dateTo + "T00:00:00");
+      d.setFullYear(d.getFullYear() - 1);
+      return [
+        d.getFullYear(),
+        String(d.getMonth() + 1).padStart(2, "0"),
+        String(d.getDate()).padStart(2, "0"),
+      ].join("-");
+    })();
+
+    fireEvent.change(dateFromInput, { target: { value: oneYearAgo } });
+
+    expect((dateFromInput as HTMLInputElement).value).toBe(oneYearAgo);
+  });
+
+  it("re-clamps dateFrom when dateTo is pulled back past the 3-year window", async () => {
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    const [dateFromInput, dateToInput] = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/);
+
+    // First set dateFrom to something reasonable (1 year ago).
+    const dateTo = (dateToInput as HTMLInputElement).value;
+    const oneYearAgo = (() => {
+      const d = new Date(dateTo + "T00:00:00");
+      d.setFullYear(d.getFullYear() - 1);
+      return [d.getFullYear(), String(d.getMonth()+1).padStart(2,"0"), String(d.getDate()).padStart(2,"0")].join("-");
+    })();
+    fireEvent.change(dateFromInput, { target: { value: oneYearAgo } });
+    expect((dateFromInput as HTMLInputElement).value).toBe(oneYearAgo);
+
+    // Now move dateTo back to 2 years after the current dateFrom — which would
+    // put dateFrom more than 3 years before the new dateTo.
+    // Use a dateTo that is only 1 month after a dateFrom that is already 3+ years ago.
+    const veryOldDateTo = "2020-06-01";
+    fireEvent.change(dateToInput, { target: { value: veryOldDateTo } });
+
+    // dateFrom must be clamped to at most 3 years before veryOldDateTo.
+    const clamped = (dateFromInput as HTMLInputElement).value;
+    expect(clamped).toBe(minDateFrom(veryOldDateTo));
+  });
+
+  it("exposes the min attribute on the dateFrom input matching the 3-year limit", async () => {
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    const [dateFromInput, dateToInput] = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/);
+    const dateTo = (dateToInput as HTMLInputElement).value;
+
+    expect((dateFromInput as HTMLInputElement).min).toBe(minDateFrom(dateTo));
   });
 });
