@@ -123,42 +123,42 @@ export async function seed(knex: Knex): Promise<void> {
   await knex("climbs").insert([
     {
       id: CLIMB_IDS["1"], name: "The Crimson Project", grade: "V8",
-      board_type: "Kilter", angle: 40,
+      board_id: "kilter-original", angle: 40,
       description: "Sick compression problem on the Kilter. Start matched on the two crimps at the bottom, move to the big sidepull, then top out on the jug rail. Felt way harder than the grade — watch the beta carefully.",
       author: "alex_sends", setter: "Tony Lamiche", sends: 3,
       created_at: "2026-03-12T14:32:00Z",
     },
     {
       id: CLIMB_IDS["2"], name: "Moonpig Direct", grade: "V6",
-      board_type: "Moonboard", angle: 40,
+      board_id: "moonboard-2016", angle: 40,
       description: "Classic Moonboard movement — sharp crimps and big moves. Set at 40 degrees. The crux is the move from H7 to J9 — keep your hips in and trust the feet.",
       author: "beth_climbs", setter: "Shawn Raboutou", sends: 8,
       created_at: "2026-03-11T09:15:00Z",
     },
     {
       id: CLIMB_IDS["3"], name: "Footwork Fundamentals", grade: "V4",
-      board_type: "Kilter", angle: 20,
+      board_id: "kilter-original", angle: 20,
       description: "A technical low-angle problem focused entirely on precise footwork and balance. Uses the full width of the board — great warmup for dialling in your feet before projecting.",
       author: "carlos_v", setter: "Carlo Traversi", sends: 14,
       created_at: "2026-03-10T18:00:00Z",
     },
     {
       id: CLIMB_IDS["4"], name: "Undercling Universe", grade: "V10",
-      board_type: "Kilter", angle: 45,
+      board_id: "kilter-original", angle: 45,
       description: "One of the hardest problems I've ever tried. Every hold is an undercling. The core tension required is insane. Finally got it after 80+ attempts — the key is keeping tension through the lower body the entire way.",
       author: "diana_proj", setter: "Daniel Woods", sends: 1,
       created_at: "2026-03-09T20:45:00Z",
     },
     {
       id: CLIMB_IDS["5"], name: "Slopey Sunday", grade: "V5",
-      board_type: "Kilter", angle: 25,
+      board_id: "kilter-original", angle: 25,
       description: "Super fun sloper problem. Low angle but the holds are incredibly polished. Great for training body tension and high feet. The finish sloper is a real test of shoulder stability.",
       author: "eli_boulders", setter: "Nalle Hukkataival", sends: 4,
       created_at: "2026-03-08T11:30:00Z",
     },
     {
       id: CLIMB_IDS["6"], name: "Gaston Alley", grade: "V7",
-      board_type: "Kilter", angle: 35,
+      board_id: "kilter-original", angle: 35,
       description: "All gastons, all day. Shoulder-intensive but incredibly satisfying. Film yourself — you'll learn a lot about your body positioning and why you keep barn-dooring off the crux.",
       author: "beth_climbs", setter: "Jimmy Webb", sends: 2,
       created_at: "2026-03-07T17:00:00Z",
@@ -167,17 +167,17 @@ export async function seed(knex: Knex): Promise<void> {
 
   // ── Beta Videos ──────────────────────────────────────────────────────────────
   await knex("beta_videos").insert([
-    { climb_id: CLIMB_IDS["1"], url: "https://www.instagram.com/reel/abc123/", thumbnail: "https://picsum.photos/seed/crimsona/320/320", platform: "instagram", credit: "@alex_sends", sort_order: 0 },
-    { climb_id: CLIMB_IDS["1"], url: "https://www.instagram.com/reel/abc456/", thumbnail: "https://picsum.photos/seed/crimsonb/320/320", platform: "instagram", credit: "@diana_proj", sort_order: 1 },
-    { climb_id: CLIMB_IDS["2"], url: "https://www.instagram.com/reel/moon1/", thumbnail: "https://picsum.photos/seed/moonpiga/320/320", platform: "instagram", credit: "@beth_climbs", sort_order: 0 },
-    { climb_id: CLIMB_IDS["2"], url: "https://www.instagram.com/reel/moon2/", thumbnail: "https://picsum.photos/seed/moonpigb/320/320", platform: "instagram", credit: "@carlos_v", sort_order: 1 },
-    { climb_id: CLIMB_IDS["2"], url: "https://www.instagram.com/reel/moon3/", thumbnail: "https://picsum.photos/seed/moonpigc/320/320", platform: "instagram", credit: "@eli_boulders", sort_order: 2 },
-    { climb_id: CLIMB_IDS["3"], url: "https://www.instagram.com/reel/foot1/", thumbnail: "https://picsum.photos/seed/footworka/320/320", platform: "instagram", credit: "@carlos_v", sort_order: 0 },
-    { climb_id: CLIMB_IDS["4"], url: "https://www.instagram.com/reel/under1/", thumbnail: "https://picsum.photos/seed/underclinga/320/320", platform: "instagram", credit: "@diana_proj", sort_order: 0 },
-    { climb_id: CLIMB_IDS["5"], url: "https://www.instagram.com/reel/slop1/", thumbnail: "https://picsum.photos/seed/slopya/320/320", platform: "instagram", credit: "@eli_boulders", sort_order: 0 },
-    { climb_id: CLIMB_IDS["5"], url: "https://www.instagram.com/reel/slop2/", thumbnail: "https://picsum.photos/seed/slopyb/320/320", platform: "instagram", credit: "@alex_sends", sort_order: 1 },
-    { climb_id: CLIMB_IDS["6"], url: "https://www.instagram.com/reel/gast1/", thumbnail: "https://picsum.photos/seed/gastona/320/320", platform: "instagram", credit: "@beth_climbs", sort_order: 0 },
-    { climb_id: CLIMB_IDS["6"], url: "https://www.instagram.com/reel/gast2/", thumbnail: "https://picsum.photos/seed/gastonb/320/320", platform: "instagram", credit: "@diana_proj", sort_order: 1 },
+    { climb_id: CLIMB_IDS["1"], url: "https://www.instagram.com/reel/abc123/", thumbnail: "https://picsum.photos/seed/crimsona/320/320", sort_order: 0 },
+    { climb_id: CLIMB_IDS["1"], url: "https://www.instagram.com/reel/abc456/", thumbnail: "https://picsum.photos/seed/crimsonb/320/320", sort_order: 1 },
+    { climb_id: CLIMB_IDS["2"], url: "https://www.instagram.com/reel/moon1/", thumbnail: "https://picsum.photos/seed/moonpiga/320/320", sort_order: 0 },
+    { climb_id: CLIMB_IDS["2"], url: "https://www.instagram.com/reel/moon2/", thumbnail: "https://picsum.photos/seed/moonpigb/320/320", sort_order: 1 },
+    { climb_id: CLIMB_IDS["2"], url: "https://www.instagram.com/reel/moon3/", thumbnail: "https://picsum.photos/seed/moonpigc/320/320", sort_order: 2 },
+    { climb_id: CLIMB_IDS["3"], url: "https://www.instagram.com/reel/foot1/", thumbnail: "https://picsum.photos/seed/footworka/320/320", sort_order: 0 },
+    { climb_id: CLIMB_IDS["4"], url: "https://www.instagram.com/reel/under1/", thumbnail: "https://picsum.photos/seed/underclinga/320/320", sort_order: 0 },
+    { climb_id: CLIMB_IDS["5"], url: "https://www.instagram.com/reel/slop1/", thumbnail: "https://picsum.photos/seed/slopya/320/320", sort_order: 0 },
+    { climb_id: CLIMB_IDS["5"], url: "https://www.instagram.com/reel/slop2/", thumbnail: "https://picsum.photos/seed/slopyb/320/320", sort_order: 1 },
+    { climb_id: CLIMB_IDS["6"], url: "https://www.instagram.com/reel/gast1/", thumbnail: "https://picsum.photos/seed/gastona/320/320", sort_order: 0 },
+    { climb_id: CLIMB_IDS["6"], url: "https://www.instagram.com/reel/gast2/", thumbnail: "https://picsum.photos/seed/gastonb/320/320", sort_order: 1 },
   ]);
 
   // ── Sessions ─────────────────────────────────────────────────────────────────
