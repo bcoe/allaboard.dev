@@ -815,7 +815,7 @@ function MoonboardImportSection({
             ? "bg-stone-700 text-stone-500 cursor-not-allowed"
             : "bg-orange-500 hover:bg-orange-400 text-white"
         }`}>
-          {importing ? "Importing…" : "Choose JSON file"}
+          {importing ? "Importing…" : "Upload Moonboard JSON"}
           <input
             ref={fileInputRef}
             type="file"
