@@ -1,4 +1,5 @@
 {
   "buildCommand": "npm run vercel-build",
-  "installCommand": "npm install && npm --prefix api install"
+  "installCommand": "npm install && npm --prefix api install",
+  "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]"
 }
