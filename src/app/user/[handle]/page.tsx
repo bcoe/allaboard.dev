@@ -14,7 +14,9 @@ import {
   followUser,
   unfollowUser,
   importAuroraData,
+  importMoonboardData,
   type AuroraImportResult,
+  type MoonboardImportResult,
 } from "@/lib/db";
 import { useAuth } from "@/lib/auth-context";
 import { ALL_GRADES, timeAgo } from "@/lib/utils";
@@ -374,6 +376,11 @@ export default function UserProfilePage() {
 
       {/* Moonboard export — own profile only */}
       {isOwn && <MoonboardExportSection />}
+
+      {/* Moonboard import — own profile only */}
+      {isOwn && (
+        <MoonboardImportSection handle={profileUser.handle} onSuccess={reload} />
+      )}
 
       {/* API token — own profile only, placed last as a developer/power-user feature */}
       {isOwn && profileUser.apiToken && (
@@ -748,6 +755,127 @@ function AuroraImportSection({
   );
 }
 
+// ─── Moonboard import ─────────────────────────────────────────────────────────
+
+function MoonboardImportSection({
+  handle,
+  onSuccess,
+}: {
+  handle: string;
+  onSuccess: () => void;
+}) {
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<MoonboardImportResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setResult(null);
+    setError(null);
+    setImporting(true);
+
+    try {
+      const text = await file.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        setError("Could not parse file — make sure it is valid JSON.");
+        return;
+      }
+
+      const res = await importMoonboardData(handle, parsed);
+      setResult(res);
+      onSuccess();
+    } catch {
+      setError("Import failed. Please try again.");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  return (
+    <section className="mt-4 pb-2">
+      <div className="bg-stone-800 border border-stone-700 rounded-xl p-4 space-y-3">
+        <div>
+          <p className="text-stone-300 text-sm font-medium">Upload Moonboard Data</p>
+          <p className="text-stone-400 text-xs mt-1 leading-relaxed">
+            Upload the JSON file you exported from moonboard.com using the snippet above
+            to import your ticks. New climbs will be created on Moonboard 2016 at 40°
+            if they don&apos;t already exist.
+          </p>
+        </div>
+
+        <label className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+          importing
+            ? "bg-stone-700 text-stone-500 cursor-not-allowed"
+            : "bg-orange-500 hover:bg-orange-400 text-white"
+        }`}>
+          {importing ? "Importing…" : "Choose JSON file"}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="sr-only"
+            disabled={importing}
+            onChange={handleFile}
+          />
+        </label>
+
+        {result && (
+          <div className="bg-stone-900 border border-stone-700 rounded-lg px-4 py-3 text-sm">
+            <p className="text-green-400 font-medium mb-2">Import complete</p>
+            <dl className="space-y-1">
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-stone-400">Ticks added</dt>
+                <dd className="text-white font-semibold">{result.imported}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-stone-400">Climbs created</dt>
+                <dd className="text-white font-semibold">{result.climbsCreated}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-stone-400">Ticks skipped</dt>
+                <dd className="text-stone-500">{result.skipped}</dd>
+              </div>
+              {result.skipped > 0 && (
+                <div className="pt-1 mt-1 border-t border-stone-800 space-y-1">
+                  {result.skipDetails.alreadyImported > 0 && (
+                    <div className="flex items-center justify-between gap-4 pl-3">
+                      <dt className="text-stone-500 text-xs">Already imported (same climb, same day)</dt>
+                      <dd className="text-stone-500 text-xs">{result.skipDetails.alreadyImported}</dd>
+                    </div>
+                  )}
+                  {result.skipDetails.unknownGrade > 0 && (
+                    <div className="flex items-center justify-between gap-4 pl-3">
+                      <dt className="text-stone-500 text-xs">Unrecognised Font grade</dt>
+                      <dd className="text-stone-500 text-xs">{result.skipDetails.unknownGrade}</dd>
+                    </div>
+                  )}
+                  {result.skipDetails.missingName > 0 && (
+                    <div className="flex items-center justify-between gap-4 pl-3">
+                      <dt className="text-stone-500 text-xs">Missing climb name</dt>
+                      <dd className="text-stone-500 text-xs">{result.skipDetails.missingName}</dd>
+                    </div>
+                  )}
+                </div>
+              )}
+            </dl>
+          </div>
+        )}
+
+        {error && (
+          <p className="text-red-400 text-sm">{error}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ─── Moonboard export ─────────────────────────────────────────────────────────
 
 const MOONBOARD_OPTIONS = [
@@ -757,6 +885,7 @@ const MOONBOARD_OPTIONS = [
 function MoonboardExportSection() {
   const [selectedFilter, setSelectedFilter] = useState<string>(MOONBOARD_OPTIONS[0].filter);
   const [copied, setCopied] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(false);
 
   const snippet = `const filter = "${selectedFilter}";
 
@@ -823,36 +952,53 @@ a.click();`
           </select>
         </div>
 
-        {/* Instructions */}
-        <ol className="space-y-1.5 text-stone-400 text-sm list-decimal list-inside">
-          <li>
-            Visit{" "}
-            <a
-              href="https://www.moonboard.com/account/login"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-orange-400 hover:text-orange-300 underline"
-            >
-              moonboard.com/account/login
-            </a>{" "}
-            and log in to your account.
-          </li>
-          <li>Copy the snippet below after selecting your board type.</li>
-          <li>On moonboard.com, right-click anywhere on the page and choose <strong>Inspect</strong>. Click the <strong>Console</strong> tab at the top of the panel that opens. Paste the script into the input at the bottom and press Enter.</li>
-        </ol>
-
-        {/* Snippet */}
-        <div className="relative">
-          <pre className="bg-stone-900 border border-stone-700 rounded-lg p-4 text-xs text-stone-300 font-mono overflow-x-auto whitespace-pre leading-relaxed">
-            {snippet}
-          </pre>
-          <button
-            onClick={copySnippet}
-            className="absolute top-3 right-3 px-3 py-1.5 bg-stone-700 hover:bg-stone-600 text-stone-300 text-xs rounded-lg transition-colors"
+        {/* Instructions toggle */}
+        <button
+          onClick={() => setShowInstructions((v) => !v)}
+          className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-300 transition-colors"
+        >
+          <svg
+            className={`w-3 h-3 shrink-0 transition-transform ${showInstructions ? "rotate-90" : ""}`}
+            viewBox="0 0 10 10" fill="currentColor"
           >
-            {copied ? "Copied!" : "Copy"}
-          </button>
-        </div>
+            <path d="M3 2l4 3-4 3V2z" />
+          </svg>
+          {showInstructions ? "Hide instructions" : "Show instructions"}
+        </button>
+
+        {showInstructions && (
+          <>
+            <ol className="space-y-1.5 text-stone-400 text-sm list-decimal list-inside">
+              <li>
+                Visit{" "}
+                <a
+                  href="https://www.moonboard.com/account/login"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-orange-400 hover:text-orange-300 underline"
+                >
+                  moonboard.com/account/login
+                </a>{" "}
+                and log in to your account.
+              </li>
+              <li>Copy the snippet below after selecting your board type.</li>
+              <li>On moonboard.com, right-click anywhere on the page and choose <strong>Inspect</strong>. Click the <strong>Console</strong> tab at the top of the panel that opens. Paste the script into the input at the bottom and press Enter.</li>
+            </ol>
+
+            {/* Snippet */}
+            <div className="relative">
+              <pre className="bg-stone-900 border border-stone-700 rounded-lg p-4 text-xs text-stone-300 font-mono overflow-x-auto whitespace-pre leading-relaxed">
+                {snippet}
+              </pre>
+              <button
+                onClick={copySnippet}
+                className="absolute top-3 right-3 px-3 py-1.5 bg-stone-700 hover:bg-stone-600 text-stone-300 text-xs rounded-lg transition-colors"
+              >
+                {copied ? "Copied!" : "Copy"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );

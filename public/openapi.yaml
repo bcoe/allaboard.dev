@@ -804,6 +804,68 @@ paths:
       security:
         - apiKeyAuth: []
         - cookieAuth: []
+  /api/users/{handle}/import/moonboard:
+    post:
+      summary: Import personal climbing data from a Moonboard JSON export.
+      parameters:
+        - name: handle
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "``json { \"imported\": 5, \"climbsCreated\": 2, \"skipped\": 1 } ``"
+        "400":
+          description: the body is missing, not valid JSON, or has no entries array.
+        "401":
+          description: not authenticated.
+        "403":
+          description: authenticated as a different user than handle.
+        "404":
+          description: the Moonboard 2016 board is not found.
+        "500":
+          description: database error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - Problem.Name
+                - Problem.Grade
+              properties:
+                Problem.Name:
+                  type: string
+                  description: climb name.
+                Problem.Grade:
+                  type: string
+                  description: Font-scale grade string (e.g. "7B+").
+                Problem.Setter.Nickname:
+                  type: string
+                  description: setter display name stored on new climbs.
+                Problem.UserRating:
+                  type: string
+                  description: user's star rating; mapped to 1–4 internally.
+                Attempts:
+                  type: string
+                  description: number of attempts for this session.
+                NumberOfTries:
+                  type: string
+                  description: "\"Project\" when not sent; a number when completed."
+                DateClimbed:
+                  type: string
+                  description: Microsoft JSON date (/Date(ms)/) or plain string.
+                DateClimbedAsString:
+                  type: string
+                  description: human-readable fallback date string.
+                Comment:
+                  type: string
+                  description: free-form notes.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
   /api/users/{handle}:
     get:
       summary: Fetch a user's public profile by handle.
