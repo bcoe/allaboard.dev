@@ -238,3 +238,26 @@ export async function importAuroraData(
     body: JSON.stringify(data),
   });
 }
+
+export interface MoonboardImportResult {
+  imported: number;
+  climbsCreated: number;
+  boardsCreated: number;
+  skipped: number;
+  skipDetails: {
+    missingName: number;
+    unknownGrade: number;
+    alreadyImported: number;
+    notSent: number;
+  };
+}
+
+export async function importMoonboardData(
+  handle: string,
+  data: unknown,
+): Promise<MoonboardImportResult> {
+  return api<MoonboardImportResult>(`/users/${encodeURIComponent(handle)}/import/moonboard`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
