@@ -1,12 +1,5 @@
 {
   "buildCommand": "npm run vercel-build",
   "installCommand": "npm install && npm --prefix api install",
-  "github": {
-    "enabled": true,
-    "autoAlias": true,
-    "silent": false,
-    "deploymentEnabled": {
-      "main": true
-    }
-  }
+  "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]"
 }
