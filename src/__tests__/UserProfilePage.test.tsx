@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import UserProfilePage from "@/app/user/[handle]/page";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -10,6 +10,7 @@ import {
   followUser,
   unfollowUser,
   importAuroraData,
+  importMoonboardData,
 } from "@/lib/db";
 import type { User } from "@/lib/types";
 
@@ -29,6 +30,7 @@ const mockCheckFollowing = jest.mocked(checkFollowing);
 const mockFollowUser = jest.mocked(followUser);
 const mockUnfollowUser = jest.mocked(unfollowUser);
 const mockImportAuroraData = jest.mocked(importAuroraData);
+const mockImportMoonboardData = jest.mocked(importMoonboardData);
 
 const targetUser: User = {
   id: "targetuser",
@@ -214,8 +216,18 @@ describe("UserProfilePage — followers list", () => {
 
 /** Returns the hidden file input inside the Aurora import label. */
 function getFileInput(): HTMLInputElement {
-  // The label's text content is "Choose JSON file"; the hidden input is inside it.
-  return screen
+  // Scope to the Aurora section so the query is unambiguous when multiple
+  // importers are rendered on the same page.
+  const section = screen.getByText("Upload Aurora Kilter Data").closest("section")!;
+  return within(section)
+    .getByText(/choose json file/i)
+    .querySelector("input[type='file']")! as HTMLInputElement;
+}
+
+/** Returns the hidden file input inside the Moonboard import label. */
+function getMoonboardFileInput(): HTMLInputElement {
+  const section = screen.getByText("Upload Moonboard Data").closest("section")!;
+  return within(section)
     .getByText(/choose json file/i)
     .querySelector("input[type='file']")! as HTMLInputElement;
 }
@@ -366,5 +378,152 @@ describe("UserProfilePage — Aurora import section", () => {
     await screen.findByText("Import complete");
     expect(screen.queryByText("Already imported (same climb, same day)")).not.toBeInTheDocument();
     expect(screen.queryByText("Unrecognised Font grade")).not.toBeInTheDocument();
+  });
+});
+
+// ── Moonboard import section ──────────────────────────────────────────────────
+
+describe("UserProfilePage — Moonboard import section", () => {
+  const moonboardJson = JSON.stringify({
+    entries: [{ id: 1, data: { Data: [{ Problem: { Name: "Test", Grade: "7A" }, DateClimbed: "/Date(1700000000000)/", NumberOfTries: 1 }] } }],
+  });
+
+  beforeEach(() => {
+    mockImportMoonboardData.mockReset();
+    mockUseAuth.mockReturnValue({
+      user: targetUser,
+      loading: false,
+      logout: jest.fn(),
+      updateUser: jest.fn(),
+    });
+  });
+
+  it("renders the Moonboard import card on the owner's profile", async () => {
+    render(<UserProfilePage />);
+    expect(await screen.findByText("Upload Moonboard Data")).toBeInTheDocument();
+  });
+
+  it("does not render the Moonboard import card on another user's profile", async () => {
+    mockUseAuth.mockReturnValue({
+      user: otherUser,
+      loading: false,
+      logout: jest.fn(),
+      updateUser: jest.fn(),
+    });
+    render(<UserProfilePage />);
+    await screen.findByText("@targetuser");
+    expect(screen.queryByText("Upload Moonboard Data")).not.toBeInTheDocument();
+  });
+
+  it("shows 'Import complete' and core stat rows after a successful import", async () => {
+    mockImportMoonboardData.mockResolvedValue({
+      imported: 5, climbsCreated: 2, boardsCreated: 0, skipped: 0,
+      skipDetails: { alreadyImported: 0, unknownGrade: 0, missingName: 0, notSent: 0 },
+    });
+
+    render(<UserProfilePage />);
+    await screen.findByText("Upload Moonboard Data");
+    selectFile(getMoonboardFileInput(), moonboardJson);
+
+    const section = (await screen.findAllByText("Import complete"))[0].closest("div")!;
+    expect(within(section).getByText("Ticks added")).toBeInTheDocument();
+    expect(within(section).getByText("Climbs created")).toBeInTheDocument();
+    expect(within(section).getByText("Ticks skipped")).toBeInTheDocument();
+  });
+
+  it("shows 'Boards created' row only when boardsCreated is non-zero", async () => {
+    mockImportMoonboardData.mockResolvedValue({
+      imported: 3, climbsCreated: 1, boardsCreated: 1, skipped: 0,
+      skipDetails: { alreadyImported: 0, unknownGrade: 0, missingName: 0, notSent: 0 },
+    });
+
+    render(<UserProfilePage />);
+    await screen.findByText("Upload Moonboard Data");
+    selectFile(getMoonboardFileInput(), moonboardJson);
+
+    await screen.findByText("Boards created");
+    expect(screen.getByText("Boards created")).toBeInTheDocument();
+  });
+
+  it("hides 'Boards created' row when boardsCreated is zero", async () => {
+    mockImportMoonboardData.mockResolvedValue({
+      imported: 3, climbsCreated: 1, boardsCreated: 0, skipped: 0,
+      skipDetails: { alreadyImported: 0, unknownGrade: 0, missingName: 0, notSent: 0 },
+    });
+
+    render(<UserProfilePage />);
+    await screen.findByText("Upload Moonboard Data");
+    selectFile(getMoonboardFileInput(), moonboardJson);
+
+    await screen.findAllByText("Import complete");
+    expect(screen.queryByText("Boards created")).not.toBeInTheDocument();
+  });
+
+  it("shows skip reason breakdown rows for each non-zero reason", async () => {
+    mockImportMoonboardData.mockResolvedValue({
+      imported: 1, climbsCreated: 0, boardsCreated: 0, skipped: 5,
+      skipDetails: { alreadyImported: 2, unknownGrade: 1, missingName: 1, notSent: 1 },
+    });
+
+    render(<UserProfilePage />);
+    await screen.findByText("Upload Moonboard Data");
+    selectFile(getMoonboardFileInput(), moonboardJson);
+
+    await screen.findAllByText("Import complete");
+    expect(screen.getByText("Projects (not sent)")).toBeInTheDocument();
+    expect(screen.getAllByText("Already imported (same climb, same day)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Unrecognised Font grade").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Missing climb name").length).toBeGreaterThan(0);
+  });
+
+  it("shows no skip breakdown when skipped is zero", async () => {
+    mockImportMoonboardData.mockResolvedValue({
+      imported: 4, climbsCreated: 0, boardsCreated: 0, skipped: 0,
+      skipDetails: { alreadyImported: 0, unknownGrade: 0, missingName: 0, notSent: 0 },
+    });
+
+    render(<UserProfilePage />);
+    await screen.findByText("Upload Moonboard Data");
+    selectFile(getMoonboardFileInput(), moonboardJson);
+
+    await screen.findAllByText("Import complete");
+    expect(screen.queryByText("Projects (not sent)")).not.toBeInTheDocument();
+  });
+
+  it("calls importMoonboardData with the profile handle and parsed file contents", async () => {
+    mockImportMoonboardData.mockResolvedValue({
+      imported: 1, climbsCreated: 0, boardsCreated: 0, skipped: 0,
+      skipDetails: { alreadyImported: 0, unknownGrade: 0, missingName: 0, notSent: 0 },
+    });
+
+    render(<UserProfilePage />);
+    await screen.findByText("Upload Moonboard Data");
+
+    const payload = JSON.parse(moonboardJson);
+    selectFile(getMoonboardFileInput(), moonboardJson);
+
+    await screen.findAllByText("Import complete");
+    expect(mockImportMoonboardData).toHaveBeenCalledWith("targetuser", payload);
+  });
+
+  it("shows an error message when the import API call fails", async () => {
+    mockImportMoonboardData.mockRejectedValue(new Error("network error"));
+
+    render(<UserProfilePage />);
+    await screen.findByText("Upload Moonboard Data");
+    selectFile(getMoonboardFileInput(), moonboardJson);
+
+    expect(await screen.findAllByText("Import failed. Please try again.")).toHaveLength(1);
+  });
+
+  it("shows a parse error when the selected file contains invalid JSON", async () => {
+    render(<UserProfilePage />);
+    await screen.findByText("Upload Moonboard Data");
+    selectFile(getMoonboardFileInput(), "not valid json {{{");
+
+    expect(
+      await screen.findByText("Could not parse file — make sure it is valid JSON.")
+    ).toBeInTheDocument();
+    expect(mockImportMoonboardData).not.toHaveBeenCalled();
   });
 });

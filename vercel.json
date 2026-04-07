@@ -1,4 +1,12 @@
 {
   "buildCommand": "npm run vercel-build",
-  "installCommand": "npm install && npm --prefix api install"
+  "installCommand": "npm install && npm --prefix api install",
+  "github": {
+    "enabled": true,
+    "autoAlias": true,
+    "silent": false,
+    "deploymentEnabled": {
+      "main": true
+    }
+  }
 }
