@@ -216,18 +216,18 @@ describe("UserProfilePage — followers list", () => {
 
 /** Returns the hidden file input inside the Aurora import label. */
 function getFileInput(): HTMLInputElement {
-  // Scope to the Aurora section so the query is unambiguous when multiple
-  // importers are rendered on the same page.
-  const section = screen.getByText("Upload Aurora Kilter Data").closest("section")!;
-  return within(section)
+  // Scope to the Aurora card div so the query is unambiguous when multiple
+  // importer cards are rendered inside the same <section>.
+  const card = screen.getByText("Upload Aurora Kilter Data").closest("div")!.parentElement!;
+  return within(card as HTMLElement)
     .getByText(/choose json file/i)
     .querySelector("input[type='file']")! as HTMLInputElement;
 }
 
 /** Returns the hidden file input inside the Moonboard import label. */
 function getMoonboardFileInput(): HTMLInputElement {
-  const section = screen.getByText("Upload Moonboard Data").closest("section")!;
-  return within(section)
+  const card = screen.getByText("Upload Moonboard Data").closest("div")!.parentElement!;
+  return within(card as HTMLElement)
     .getByText(/choose json file/i)
     .querySelector("input[type='file']")! as HTMLInputElement;
 }

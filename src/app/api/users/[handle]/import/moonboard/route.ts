@@ -80,6 +80,15 @@ interface MoonboardExport {
   [key: string]: unknown;
 }
 
+/** Convert a string to Title Case (e.g. "SIT START" → "Sit Start"). */
+function toTitleCase(str: string): string {
+  return str
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
 /**
  * Extract the wall angle from a MoonBoardConfiguration description string.
  * e.g. "40° MoonBoard" → 40, "20° MoonBoard" → 20.
@@ -206,8 +215,9 @@ export async function POST(
       const sent = record.NumberOfTries !== "Project";
       if (!sent) { skipDetails.notSent++; continue; }
       
-      const climbName = record.Problem?.Name?.trim();
-      if (!climbName) { skipDetails.missingName++; continue; }
+      const rawName = record.Problem?.Name?.trim();
+      if (!rawName) { skipDetails.missingName++; continue; }
+      const climbName = toTitleCase(rawName);
 
       // Grade lives on Problem.Grade (official) — UserGrade is user's opinion.
       const rawGrade = record.Problem?.Grade ?? record.Problem?.UserGrade ?? "";
@@ -272,10 +282,8 @@ export async function POST(
 
       // Skip if a tick from this user already exists for this climb on the same
       // calendar day, so re-running the same export is idempotent.
-      const tickDay = tickDate.toISOString().slice(0, 10);
       const existing = await db("ticks")
-        .where({ climb_id: climb.id, user_id: userId })
-        .whereRaw("DATE(date) = ?", [tickDay])
+        .where({ climb_id: climb.id, user_id: userId, date: tickDate })
         .first();
       if (existing) { skipDetails.alreadyImported++; continue; }
 
