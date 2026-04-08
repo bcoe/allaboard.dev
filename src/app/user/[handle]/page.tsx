@@ -371,16 +371,11 @@ export default function UserProfilePage() {
 
       {/* Import Data — own profile only */}
       {isOwn && (
-        <AuroraImportSection handle={profileUser.handle} onSuccess={reload} />
+        <ImportSection handle={profileUser.handle} onSuccess={reload} />
       )}
 
       {/* Moonboard export — own profile only */}
       {isOwn && <MoonboardExportSection />}
-
-      {/* Moonboard import — own profile only */}
-      {isOwn && (
-        <MoonboardImportSection handle={profileUser.handle} onSuccess={reload} />
-      )}
 
       {/* API token — own profile only, placed last as a developer/power-user feature */}
       {isOwn && profileUser.apiToken && (
@@ -628,7 +623,7 @@ function TickCard({
   );
 }
 
-function AuroraImportSection({
+function ImportSection({
   handle,
   onSuccess,
 }: {
@@ -639,6 +634,11 @@ function AuroraImportSection({
   const [result, setResult] = useState<AuroraImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [mbImporting, setMbImporting] = useState(false);
+  const [mbResult, setMbResult] = useState<MoonboardImportResult | null>(null);
+  const [mbError, setMbError] = useState<string | null>(null);
+  const mbFileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -667,6 +667,35 @@ function AuroraImportSection({
       setImporting(false);
       // Reset so the same file can be re-selected after fixing an error
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleMoonboardFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setMbResult(null);
+    setMbError(null);
+    setMbImporting(true);
+
+    try {
+      const text = await file.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        setMbError("Could not parse file — make sure it is valid JSON.");
+        return;
+      }
+
+      const res = await importMoonboardData(handle, parsed);
+      setMbResult(res);
+      onSuccess();
+    } catch {
+      setMbError("Import failed. Please try again.");
+    } finally {
+      setMbImporting(false);
+      if (mbFileInputRef.current) mbFileInputRef.current.value = "";
     }
   }
 
@@ -751,56 +780,8 @@ function AuroraImportSection({
           <p className="text-red-400 text-sm">{error}</p>
         )}
       </div>
-    </section>
-  );
-}
 
-// ─── Moonboard import ─────────────────────────────────────────────────────────
-
-function MoonboardImportSection({
-  handle,
-  onSuccess,
-}: {
-  handle: string;
-  onSuccess: () => void;
-}) {
-  const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<MoonboardImportResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setResult(null);
-    setError(null);
-    setImporting(true);
-
-    try {
-      const text = await file.text();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        setError("Could not parse file — make sure it is valid JSON.");
-        return;
-      }
-
-      const res = await importMoonboardData(handle, parsed);
-      setResult(res);
-      onSuccess();
-    } catch {
-      setError("Import failed. Please try again.");
-    } finally {
-      setImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  }
-
-  return (
-    <section className="mt-4 pb-2">
-      <div className="bg-stone-800 border border-stone-700 rounded-xl p-4 space-y-3">
+      <div className="bg-stone-800 border border-stone-700 rounded-xl p-4 space-y-3 mt-3">
         <div>
           <p className="text-stone-300 text-sm font-medium">Upload Moonboard Data</p>
           <p className="text-stone-400 text-xs mt-1 leading-relaxed">
@@ -811,67 +792,67 @@ function MoonboardImportSection({
         </div>
 
         <label className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-          importing
+          mbImporting
             ? "bg-stone-700 text-stone-500 cursor-not-allowed"
             : "bg-orange-500 hover:bg-orange-400 text-white"
         }`}>
-          {importing ? "Importing…" : "Choose JSON file"}
+          {mbImporting ? "Importing…" : "Choose JSON file"}
           <input
-            ref={fileInputRef}
+            ref={mbFileInputRef}
             type="file"
             accept=".json,application/json"
             className="sr-only"
-            disabled={importing}
-            onChange={handleFile}
+            disabled={mbImporting}
+            onChange={handleMoonboardFile}
           />
         </label>
 
-        {result && (
+        {mbResult && (
           <div className="bg-stone-900 border border-stone-700 rounded-lg px-4 py-3 text-sm">
             <p className="text-green-400 font-medium mb-2">Import complete</p>
             <dl className="space-y-1">
               <div className="flex items-center justify-between gap-4">
                 <dt className="text-stone-400">Ticks added</dt>
-                <dd className="text-white font-semibold">{result.imported}</dd>
+                <dd className="text-white font-semibold">{mbResult.imported}</dd>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <dt className="text-stone-400">Climbs created</dt>
-                <dd className="text-white font-semibold">{result.climbsCreated}</dd>
+                <dd className="text-white font-semibold">{mbResult.climbsCreated}</dd>
               </div>
-              {result.boardsCreated > 0 && (
+              {mbResult.boardsCreated > 0 && (
                 <div className="flex items-center justify-between gap-4">
                   <dt className="text-stone-400">Boards created</dt>
-                  <dd className="text-white font-semibold">{result.boardsCreated}</dd>
+                  <dd className="text-white font-semibold">{mbResult.boardsCreated}</dd>
                 </div>
               )}
               <div className="flex items-center justify-between gap-4">
                 <dt className="text-stone-400">Ticks skipped</dt>
-                <dd className="text-stone-500">{result.skipped}</dd>
+                <dd className="text-stone-500">{mbResult.skipped}</dd>
               </div>
-              {result.skipped > 0 && (
+              {mbResult.skipped > 0 && (
                 <div className="pt-1 mt-1 border-t border-stone-800 space-y-1">
-                  {result.skipDetails.alreadyImported > 0 && (
+                  {mbResult.skipDetails.alreadyImported > 0 && (
                     <div className="flex items-center justify-between gap-4 pl-3">
                       <dt className="text-stone-500 text-xs">Already imported (same climb, same day)</dt>
-                      <dd className="text-stone-500 text-xs">{result.skipDetails.alreadyImported}</dd>
+                      <dd className="text-stone-500 text-xs">{mbResult.skipDetails.alreadyImported}</dd>
                     </div>
                   )}
-                  {result.skipDetails.unknownGrade > 0 && (
+                  {mbResult.skipDetails.unknownGrade > 0 && (
                     <div className="flex items-center justify-between gap-4 pl-3">
                       <dt className="text-stone-500 text-xs">Unrecognised Font grade</dt>
-                      <dd className="text-stone-500 text-xs">{result.skipDetails.unknownGrade}</dd>
+                      <dd className="text-stone-500 text-xs">{mbResult.skipDetails.unknownGrade}</dd>
                     </div>
                   )}
-                  {result.skipDetails.missingName > 0 && (
+                  {mbResult.skipDetails.missingName > 0 && (
                     <div className="flex items-center justify-between gap-4 pl-3">
                       <dt className="text-stone-500 text-xs">Missing climb name</dt>
-                      <dd className="text-stone-500 text-xs">{result.skipDetails.missingName}</dd>
+                      <dd className="text-stone-500 text-xs">{mbResult.skipDetails.missingName}</dd>
                     </div>
                   )}
-                  {result.skipDetails.notSent > 0 && (
+                  {mbResult.skipDetails.notSent > 0 && (
                     <div className="flex items-center justify-between gap-4 pl-3">
                       <dt className="text-stone-500 text-xs">Projects (not sent)</dt>
-                      <dd className="text-stone-500 text-xs">{result.skipDetails.notSent}</dd>
+                      <dd className="text-stone-500 text-xs">{mbResult.skipDetails.notSent}</dd>
                     </div>
                   )}
                 </div>
@@ -880,8 +861,8 @@ function MoonboardImportSection({
           </div>
         )}
 
-        {error && (
-          <p className="text-red-400 text-sm">{error}</p>
+        {mbError && (
+          <p className="text-red-400 text-sm">{mbError}</p>
         )}
       </div>
     </section>
