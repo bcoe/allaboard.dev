@@ -413,21 +413,17 @@ function makeDefaultFilter(months: number): ChartFilter {
   return { dateFrom: defaultDateFrom(months), dateTo: localDateStr(new Date()), boards: [] };
 }
 
-const MAX_CHART_YEARS = 3;
+/** Earliest date the charts support — Moonboard launched in 2012. */
+const EARLIEST_DATE = "2012-01-01";
 
 /**
- * Clamp a proposed dateFrom so the range [dateFrom, dateTo] is at most
- * MAX_CHART_YEARS years.  Rendering every day in a multi-decade range as
- * heatmap categories will crash the browser.
+ * Clamp a proposed dateFrom so it is not before EARLIEST_DATE and not after dateTo.
  */
 function clampDateFrom(dateFrom: string, dateTo: string): string {
   if (!dateFrom || !dateTo) return dateFrom;
-  const minFrom = new Date(dateTo + "T00:00:00");
-  minFrom.setFullYear(minFrom.getFullYear() - MAX_CHART_YEARS);
-  const minFromStr = localDateStr(minFrom);
-  // If dateFrom is after dateTo (invalid range), reset to the earliest valid date.
-  if (dateFrom > dateTo) return minFromStr;
-  return dateFrom < minFromStr ? minFromStr : dateFrom;
+  // If dateFrom is after dateTo (invalid range), reset to the floor.
+  if (dateFrom > dateTo) return EARLIEST_DATE;
+  return dateFrom < EARLIEST_DATE ? EARLIEST_DATE : dateFrom;
 }
 
 /** True when called in a browser with a narrow viewport (Tailwind `sm` breakpoint). */
@@ -533,11 +529,7 @@ function ChartFilters({
   granularity?: "day" | "week";
   onGranularityChange?: (g: "day" | "week") => void;
 }) {
-  const earliestAllowed = (() => {
-    const d = new Date(filter.dateTo + "T00:00:00");
-    d.setFullYear(d.getFullYear() - MAX_CHART_YEARS);
-    return localDateStr(d);
-  })();
+  const earliestAllowed = EARLIEST_DATE;
 
   return (
     <div className="flex flex-wrap items-center gap-2 mb-4">
