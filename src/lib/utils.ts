@@ -29,6 +29,27 @@ export const ALL_GRADES: Grade[] = [
   "V9","V10","V11","V12","V13","V14","V15","V16","V17","V18",
 ];
 
+/** Numeric index for each grade, with V5+ and V8+ as half-steps. */
+const GRADE_INDEX: Record<string, number> = {
+  V0: 0, V1: 1, V2: 2, V3: 3, V4: 4,
+  V5: 5, "V5+": 5.5, V6: 6, V7: 7, V8: 8, "V8+": 8.5,
+  V9: 9, V10: 10, V11: 11, V12: 12, V13: 13,
+  V14: 14, V15: 15, V16: 16, V17: 17, V18: 18,
+};
+
+/**
+ * Points awarded for a tick at the given grade.
+ * Formula: base = round(10 × 1.3^n); flash bonus = round(base × 0.20).
+ * A "flash" is a send on the first attempt (attempts === 1).
+ */
+export function gradePoints(grade: string): { base: number; flash: number } {
+  const n = GRADE_INDEX[grade];
+  if (n === undefined) return { base: 0, flash: 0 };
+  const base = Math.round(10 * 1.3 ** n);
+  const flash = Math.round(base * 0.2);
+  return { base, flash };
+}
+
 export function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const minutes = Math.floor(diff / 60000);
