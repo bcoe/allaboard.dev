@@ -47,5 +47,6 @@ export async function GET() {
       ...(user.personal_best_kilter    ? { Kilter:    user.personal_best_kilter    } : {}),
       ...(user.personal_best_moonboard ? { Moonboard: user.personal_best_moonboard } : {}),
     },
+    points: user.points ?? 0,
   });
 }

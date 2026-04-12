@@ -198,7 +198,8 @@ describe("recalculateBoardDifficulty()", () => {
           boardRow("board-b", "Board B"),
         ]))
         .mockReturnValueOnce(qbEx())                             // DB 4: update board-a
-        .mockReturnValueOnce(qbEx());                            // DB 5: update board-b
+        .mockReturnValueOnce(qbEx())                             // DB 5: update board-b
+        .mockReturnValueOnce(qbEx());                            // DB 6: reset user points
     }
 
     it("assigns 1.0 to the easier board and 2.0 to the harder board", async () => {
@@ -247,8 +248,9 @@ describe("recalculateBoardDifficulty()", () => {
           boardRow("board-a", "Board A"),
           boardRow("board-b", "Board B"),
         ]))
-        .mockReturnValueOnce(qbEx())
-        .mockReturnValueOnce(qbEx());
+        .mockReturnValueOnce(qbEx())                             // update board-a
+        .mockReturnValueOnce(qbEx())                             // update board-b
+        .mockReturnValueOnce(qbEx());                            // reset user points
 
       const { boardScores } = await recalculateBoardDifficulty();
 
@@ -260,12 +262,12 @@ describe("recalculateBoardDifficulty()", () => {
       setup2Board();
       await recalculateBoardDifficulty();
 
-      // DB calls 4 and 5 are the board updates
-      const updateCalls = mockDb.mock.calls.slice(3); // skip calls 1-3
-      expect(updateCalls).toHaveLength(2);
-      // Each update call: db("boards")
-      expect(updateCalls[0][0]).toBe("boards");
-      expect(updateCalls[1][0]).toBe("boards");
+      // DB calls 4 and 5 are the board updates; call 6 resets user points
+      const postQueryCalls = mockDb.mock.calls.slice(3); // skip calls 1-3
+      expect(postQueryCalls).toHaveLength(3);
+      expect(postQueryCalls[0][0]).toBe("boards");
+      expect(postQueryCalls[1][0]).toBe("boards");
+      expect(postQueryCalls[2][0]).toBe("users");
     });
   });
 
@@ -296,7 +298,8 @@ describe("recalculateBoardDifficulty()", () => {
         ]))
         .mockReturnValueOnce(qbEx())   // update board-a
         .mockReturnValueOnce(qbEx())   // update board-b
-        .mockReturnValueOnce(qbEx());  // update board-c
+        .mockReturnValueOnce(qbEx())   // update board-c
+        .mockReturnValueOnce(qbEx());  // reset user points
     }
 
     it("assigns 1.0 to the easiest and 2.0 to the hardest", async () => {
@@ -355,8 +358,9 @@ describe("recalculateBoardDifficulty()", () => {
           boardRow("board-a", "Board A"),
           boardRow("board-b", "Board B"),
         ]))
-        .mockReturnValueOnce(qbEx())
-        .mockReturnValueOnce(qbEx());
+        .mockReturnValueOnce(qbEx())                             // update board-a
+        .mockReturnValueOnce(qbEx())                             // update board-b
+        .mockReturnValueOnce(qbEx());                            // reset user points
 
       const { boardScores } = await recalculateBoardDifficulty();
 
@@ -391,7 +395,8 @@ describe("recalculateBoardDifficulty()", () => {
         ]))
         .mockReturnValueOnce(qbEx())   // update board-a
         .mockReturnValueOnce(qbEx())   // update board-b
-        .mockReturnValueOnce(qbEx());  // update board-c
+        .mockReturnValueOnce(qbEx())   // update board-c
+        .mockReturnValueOnce(qbEx());  // reset user points
 
       const { boardScores } = await recalculateBoardDifficulty();
 
@@ -425,8 +430,9 @@ describe("recalculateBoardDifficulty()", () => {
           boardRow("board-a", "Board A"),
           boardRow("board-b", "Board B"),
         ]))
-        .mockReturnValueOnce(qbEx())
-        .mockReturnValueOnce(qbEx());
+        .mockReturnValueOnce(qbEx())                             // update board-a
+        .mockReturnValueOnce(qbEx())                             // update board-b
+        .mockReturnValueOnce(qbEx());                            // reset user points
 
       const { boardScores } = await recalculateBoardDifficulty();
 
@@ -453,8 +459,9 @@ describe("recalculateBoardDifficulty()", () => {
           boardRow("board-a", "Board A"),
           boardRow("board-b", "Board B"),
         ]))
-        .mockReturnValueOnce(qbEx())
-        .mockReturnValueOnce(qbEx());
+        .mockReturnValueOnce(qbEx())                             // update board-a
+        .mockReturnValueOnce(qbEx())                             // update board-b
+        .mockReturnValueOnce(qbEx());                            // reset user points
     });
 
     it("includes the climber handle in the log", async () => {
@@ -513,8 +520,9 @@ describe("recalculateBoardDifficulty()", () => {
           boardRow("board-a", "Board A"),
           boardRow("board-b", "Board B"),
         ]))
-        .mockReturnValueOnce(qbEx())
-        .mockReturnValueOnce(qbEx());
+        .mockReturnValueOnce(qbEx())                             // update board-a
+        .mockReturnValueOnce(qbEx())                             // update board-b
+        .mockReturnValueOnce(qbEx());                            // reset user points
 
       const { boardScores } = await recalculateBoardDifficulty();
 
@@ -545,8 +553,9 @@ describe("recalculateBoardDifficulty()", () => {
           boardRow("board-a", "Board A"),
           boardRow("board-b", "Board B"),
         ]))
-        .mockReturnValueOnce(qbEx())
-        .mockReturnValueOnce(qbEx());
+        .mockReturnValueOnce(qbEx())                             // update board-a
+        .mockReturnValueOnce(qbEx())                             // update board-b
+        .mockReturnValueOnce(qbEx());                            // reset user points
 
       const { boardScores } = await recalculateBoardDifficulty();
 
@@ -578,8 +587,9 @@ describe("recalculateBoardDifficulty()", () => {
           boardRow("board-a", "Board A"),
           boardRow("board-b", "Board B"),
         ]))
-        .mockReturnValueOnce(qbEx())
-        .mockReturnValueOnce(qbEx());
+        .mockReturnValueOnce(qbEx())                             // update board-a
+        .mockReturnValueOnce(qbEx())                             // update board-b
+        .mockReturnValueOnce(qbEx());                            // reset user points
 
       const { boardScores } = await recalculateBoardDifficulty();
 

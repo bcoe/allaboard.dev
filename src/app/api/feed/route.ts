@@ -118,6 +118,7 @@ export async function GET(req: NextRequest) {
           ...(r.personal_best_kilter   ? { Kilter: r.personal_best_kilter }     : {}),
           ...(r.personal_best_moonboard ? { Moonboard: r.personal_best_moonboard } : {}),
         },
+        points: r.points ?? 0,
       },
       climb: {
         id: r.climb_id, name: r.climb_name, grade: r.grade,
