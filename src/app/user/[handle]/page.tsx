@@ -15,8 +15,10 @@ import {
   unfollowUser,
   importAuroraData,
   importMoonboardData,
+  recalculateBoardDifficulty,
   type AuroraImportResult,
   type MoonboardImportResult,
+  type BoardDifficultyResult,
 } from "@/lib/db";
 import { useAuth } from "@/lib/auth-context";
 import { ALL_GRADES, timeAgo } from "@/lib/utils";
@@ -376,6 +378,9 @@ export default function UserProfilePage() {
 
       {/* Moonboard export — own profile only */}
       {isOwn && <MoonboardExportSection />}
+
+      {/* Board difficulty — admin only (bc viewing their own profile) */}
+      {isOwn && handle === "bc" && <BoardDifficultySection />}
 
       {/* API token — own profile only, placed last as a developer/power-user feature */}
       {isOwn && profileUser.apiToken && (
@@ -992,6 +997,97 @@ a.click();`
             </div>
           </>
         )}
+      </div>
+    </section>
+  );
+}
+
+// ─── Board difficulty (admin only) ───────────────────────────────────────────
+
+function BoardDifficultySection() {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<BoardDifficultyResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleRecalculate() {
+    if (
+      !confirm(
+        "Recalculate board relative difficulty scores?\n\n" +
+          "This will overwrite the current values for all boards that have qualifying data.",
+      )
+    ) return;
+
+    setRunning(true);
+    setResult(null);
+    setError(null);
+
+    try {
+      const res = await recalculateBoardDifficulty();
+      setResult(res);
+    } catch {
+      setError("Calculation failed. Check the server console for details.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <section className="mt-8 pb-8">
+      <h2 className="text-orange-400 font-semibold text-lg mb-3">Board Difficulty</h2>
+      <div className="bg-stone-800 border border-stone-700 rounded-xl p-4 space-y-3">
+        <p className="text-stone-400 text-xs leading-relaxed">
+          Recalculates the <code className="font-mono bg-stone-700 px-1 rounded">relative_difficulty</code>{" "}
+          score for every board using logistic regression fitted per climber. Each attempt is one
+          Bernoulli trial:{" "}
+          <code className="font-mono bg-stone-700 px-1 rounded">
+            logit(P(send)) = β₀ + β_grade · grade + Σ β_board · board_indicator
+          </code>. Board coefficients capture difficulty controlling for grade — a more-negative
+          coefficient means harder. Only climbers with ≥{5} sessions on ≥{2} boards contribute.
+          Scores are normalised per climber, averaged across climbers, and stored on a x1.0–x2.0
+          scale (x1.0 = easiest, x2.0 = hardest).
+        </p>
+
+        <button
+          onClick={() => void handleRecalculate()}
+          disabled={running}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            running
+              ? "bg-stone-700 text-stone-500 cursor-not-allowed"
+              : "bg-orange-500 hover:bg-orange-400 text-white"
+          }`}
+        >
+          {running ? "Calculating…" : "Recalculate Board Difficulty"}
+        </button>
+
+        {result && (
+          <div className="bg-stone-900 border border-stone-700 rounded-lg px-4 py-3 space-y-3">
+            <p className="text-green-400 font-medium text-sm">Calculation complete</p>
+
+            {Object.keys(result.boardScores).length > 0 ? (
+              <dl className="space-y-1">
+                {Object.entries(result.boardScores).map(([id, score]) => (
+                  <div key={id} className="flex items-center justify-between gap-4">
+                    <dt className="text-stone-400 text-xs truncate">{id}</dt>
+                    <dd className="text-white text-xs font-mono shrink-0">{score.toFixed(4)}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p className="text-stone-500 text-xs">No boards updated (insufficient data).</p>
+            )}
+
+            <details>
+              <summary className="text-stone-500 text-xs cursor-pointer hover:text-stone-300 transition-colors select-none">
+                View detailed log ({result.lines.length} lines)
+              </summary>
+              <pre className="mt-2 bg-stone-950 border border-stone-800 rounded p-3 text-xs text-stone-400 font-mono overflow-x-auto whitespace-pre leading-relaxed max-h-96 overflow-y-auto">
+                {result.lines.join("\n")}
+              </pre>
+            </details>
+          </div>
+        )}
+
+        {error && <p className="text-red-400 text-sm">{error}</p>}
       </div>
     </section>
   );
