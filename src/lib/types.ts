@@ -4,12 +4,13 @@ export type Grade =
   | "V17" | "V18";
 
 export interface Board {
-  id: string;            // text slug, e.g. 'kilter-original'
-  name: string;          // e.g. 'Kilter Board (Original)'
+  id: string;                      // text slug, e.g. 'kilter-original'
+  name: string;                    // e.g. 'Kilter Board (Original)'
   type: "standard" | "spray_wall";
-  location?: string;     // spray walls only
-  description?: string;  // spray walls only
-  createdBy?: string;    // handle of the user who added it; null for pre-seeded boards
+  relativeDifficulty: number;      // scaling factor relative to 1.0 baseline
+  location?: string;               // spray walls only
+  description?: string;            // spray walls only
+  createdBy?: string;              // handle of the user who added it; null for pre-seeded boards
 }
 
 export interface BetaVideo {

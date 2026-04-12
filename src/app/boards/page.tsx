@@ -108,14 +108,25 @@ function BoardCard({
             <p className="text-stone-500 text-sm mt-1 leading-relaxed">{board.description}</p>
           )}
         </div>
-        {canEdit && (
-          <button
-            onClick={onEdit}
-            className="shrink-0 text-xs text-stone-500 hover:text-orange-400 transition-colors"
-          >
-            Edit
-          </button>
-        )}
+        <div className="shrink-0 flex flex-col items-end gap-2">
+          <div className="relative group cursor-default text-right">
+            <p className="text-stone-500 text-xs font-medium uppercase tracking-wider">Multiplier</p>
+            <p className="text-orange-400 font-bold text-xl tabular-nums leading-tight">
+              x{board.relativeDifficulty.toFixed(2)}
+            </p>
+            <div className="absolute right-0 top-full mt-1.5 w-52 bg-stone-900 border border-stone-700 rounded-lg px-3 py-2 text-xs text-stone-400 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+              Estimated relative difficulty to other boards. x1.00 is the baseline.
+            </div>
+          </div>
+          {canEdit && (
+            <button
+              onClick={onEdit}
+              className="text-xs text-stone-500 hover:text-orange-400 transition-colors"
+            >
+              Edit
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

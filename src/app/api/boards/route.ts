@@ -13,12 +13,13 @@ import { sessionOptions, type SessionData } from "@/lib/server/session";
 
 function toBoard(row: Record<string, unknown>) {
   return {
-    id:          row.id,
-    name:        row.name,
-    type:        row.type ?? "standard",
-    location:    row.location ?? undefined,
-    description: row.description ?? undefined,
-    createdBy:   row.created_by ?? undefined,
+    id:                 row.id,
+    name:               row.name,
+    type:               row.type ?? "standard",
+    relativeDifficulty: Number(row.relative_difficulty ?? 1.0),
+    location:           row.location ?? undefined,
+    description:        row.description ?? undefined,
+    createdBy:          row.created_by ?? undefined,
   };
 }
 

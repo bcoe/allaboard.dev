@@ -261,3 +261,14 @@ export async function importMoonboardData(
     body: JSON.stringify(data),
   });
 }
+
+export interface BoardDifficultyResult {
+  lines: string[];
+  boardScores: Record<string, number>;
+}
+
+export async function recalculateBoardDifficulty(): Promise<BoardDifficultyResult> {
+  return api<BoardDifficultyResult>("/admin/recalculate-board-difficulty", {
+    method: "POST",
+  });
+}

@@ -23,6 +23,21 @@ components:
       name: token
       description: Personal API token from your profile page. Pass as ?token=<value>.
 paths:
+  /api/admin/recalculate-board-difficulty:
+    post:
+      summary: Recalculate board relative difficulty scores and persist them to the database.
+      responses:
+        "200":
+          description: JSON with lines (detailed calculation log) and boardScores (map of boardId → new relative_difficulty value written to the DB).
+        "401":
+          description: not authenticated.
+        "403":
+          description: the caller is not the admin account.
+        "500":
+          description: internal error.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
   /api/auth/me:
     get:
       summary: Return the profile of the currently authenticated user.
