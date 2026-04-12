@@ -73,12 +73,35 @@ function TickTooltip({ ticks }: { ticks: UserTick[] }) {
 }
 
 function GradeCellWithTooltip({ grade, ticks }: { grade: Grade; ticks: UserTick[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | TouchEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [open]);
+
   return (
-    <div className="relative group inline-flex cursor-default">
+    <div
+      ref={ref}
+      className="relative inline-flex cursor-pointer select-none"
+      onClick={() => setOpen((o) => !o)}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
       <GradeBadge grade={grade} size="md" />
       {ticks.length > 0 && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50
-                        opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 transition-opacity ${
+          open ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}>
           <TickTooltip ticks={ticks} />
         </div>
       )}

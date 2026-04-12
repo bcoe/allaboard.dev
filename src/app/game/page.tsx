@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getLeaderboard, type LeaderboardEntry, type HardestGradeTick } from "@/lib/db";
 import { Grade } from "@/lib/types";
@@ -60,14 +60,37 @@ function HardestGradeTooltip({ ticks }: { ticks: HardestGradeTick[] }) {
 }
 
 function HardestGradeCell({ grade, ticks }: { grade: string | null; ticks: HardestGradeTick[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | TouchEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [open]);
+
   if (!grade) return <span className="text-stone-600 text-sm">—</span>;
 
   return (
-    <div className="relative group inline-flex cursor-default">
+    <div
+      ref={ref}
+      className="relative inline-flex cursor-pointer select-none"
+      onClick={() => setOpen((o) => !o)}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
       <GradeBadge grade={grade as Grade} size="sm" />
       {ticks.length > 0 && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50
-                        opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 transition-opacity ${
+          open ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}>
           <HardestGradeTooltip ticks={ticks} />
         </div>
       )}
@@ -90,7 +113,7 @@ function LeaderboardCard({ entry, rank }: { entry: LeaderboardEntry; rank: numbe
   } as Parameters<typeof UserAvatar>[0]["user"];
 
   return (
-    <div className="bg-stone-800 border border-stone-700 rounded-xl px-5 py-4 flex items-center gap-4">
+    <div className="bg-stone-800 border border-stone-700 rounded-xl px-3 sm:px-5 py-3 sm:py-4 flex items-center gap-2 sm:gap-4">
 
       {/* ── Medal / rank — fixed width so all cards align identically ── */}
       <div className="shrink-0 w-10 flex items-center justify-center">
