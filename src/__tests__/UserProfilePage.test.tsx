@@ -503,7 +503,7 @@ describe("UserProfilePage — Moonboard import section", () => {
     selectFile(getMoonboardFileInput(), moonboardJson);
 
     await screen.findAllByText("Import complete");
-    expect(mockImportMoonboardData).toHaveBeenCalledWith("targetuser", payload);
+    expect(mockImportMoonboardData).toHaveBeenCalledWith("targetuser", payload, "Moonboard 2016");
   });
 
   it("shows an error message when the import API call fails", async () => {
