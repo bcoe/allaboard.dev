@@ -255,8 +255,10 @@ export interface MoonboardImportResult {
 export async function importMoonboardData(
   handle: string,
   data: unknown,
+  boardName?: string,
 ): Promise<MoonboardImportResult> {
-  return api<MoonboardImportResult>(`/users/${encodeURIComponent(handle)}/import/moonboard`, {
+  const qs = boardName ? `?boardName=${encodeURIComponent(boardName)}` : "";
+  return api<MoonboardImportResult>(`/users/${encodeURIComponent(handle)}/import/moonboard${qs}`, {
     method: "POST",
     body: JSON.stringify(data),
   });
