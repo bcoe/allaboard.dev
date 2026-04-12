@@ -455,6 +455,14 @@ paths:
       responses:
         "200":
           description: "{ ok: true } — always returns 200 when the server is up."
+  /api/leaderboard:
+    get:
+      summary: Return all users sorted by points descending, with their total tick count, hardest sent grade, and up to five ticks at that grade for the hover tooltip.
+      responses:
+        "200":
+          description: "Array of leaderboard entries ordered by points descending. Each entry includes: - id, handle, displayName, avatarColor, profilePictureUrl - points — current accumulated point total - totalTicks — all ticks (sent + working) - hardestGrade — highest V-grade sent, or null if none - hardestGradeTicks — up to 5 most-recent sent ticks at hardestGrade (climbId, climbName, grade, boardName, angle, attempts, date)"
+        "500":
+          description: database error.
   /api/log-entries:
     post:
       summary: Log a climb attempt, auto-creating a session for the day if needed.

@@ -264,6 +264,35 @@ export async function importMoonboardData(
   });
 }
 
+// ─── Leaderboard ──────────────────────────────────────────────────────────────
+
+export interface HardestGradeTick {
+  id: string;
+  climbId: string;
+  climbName: string;
+  grade: string;
+  boardName: string;
+  angle: number | null;
+  attempts?: number;
+  date: string;
+}
+
+export interface LeaderboardEntry {
+  id: string;
+  handle: string;
+  displayName: string;
+  avatarColor: string;
+  profilePictureUrl?: string;
+  points: number;
+  totalTicks: number;
+  hardestGrade: string | null;
+  hardestGradeTicks: HardestGradeTick[];
+}
+
+export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
+  return api<LeaderboardEntry[]>("/leaderboard");
+}
+
 export interface BoardDifficultyResult {
   lines: string[];
   boardScores: Record<string, number>;

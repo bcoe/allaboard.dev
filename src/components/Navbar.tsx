@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { label: "Feed",   href: "/" },
   { label: "Climbs", href: "/climbs" },
   { label: "Boards", href: "/boards" },
+  { label: "Game",   href: "/game" },
 ];
 
 export default function Navbar() {

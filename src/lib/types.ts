@@ -95,6 +95,7 @@ export interface User {
   followersCount: number;
   followingCount: number;
   personalBests: Partial<Record<string, Grade>>;
+  points?: number;
   /** Only present when the authenticated user fetches their own profile. */
   apiToken?: string;
 }

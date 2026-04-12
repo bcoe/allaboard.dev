@@ -304,6 +304,35 @@ export async function recalculateBoardDifficulty(): Promise<DifficultyResult> {
       await db("boards").where({ id: boardId }).update({ relative_difficulty: score });
       log(`  ${boardId} → ${score.toFixed(4)}`);
     }
+
+    // Recalculate all user points with the newly updated board difficulties.
+    log("");
+    log("Recalculating user points…");
+    await db("users").update({ points: 0 });
+    await db.raw(`
+      UPDATE users u
+      SET points = subq.total_points
+      FROM (
+        SELECT
+          t.user_id,
+          SUM(
+            CASE
+              WHEN t.attempts = 1 THEN
+                ROUND((grade_base_points(c.grade) + ROUND(grade_base_points(c.grade) * 0.2)) * COALESCE(b.relative_difficulty, 1.0))
+              ELSE
+                ROUND(grade_base_points(c.grade) * COALESCE(b.relative_difficulty, 1.0))
+            END
+          )::integer AS total_points
+        FROM ticks t
+        JOIN climbs c ON c.id = t.climb_id
+        LEFT JOIN boards b ON b.id = c.board_id
+        WHERE t.sent = true
+          AND grade_base_points(c.grade) > 0
+        GROUP BY t.user_id
+      ) subq
+      WHERE u.id = subq.user_id;
+    `);
+    log("User points updated.");
   }
 
   log("");
