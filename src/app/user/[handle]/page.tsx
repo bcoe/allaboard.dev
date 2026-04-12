@@ -30,6 +30,62 @@ import Link from "next/link";
 
 type SocialTab = "ticks" | "followers" | "following";
 
+// ── Hex equivalents of GRADE_COLORS (mirrors stats / game pages) ──────────────
+const GRADE_HEX: Record<string, string> = {
+  V0:   "#15803d", V1:  "#16a34a", V2:  "#22c55e", V3:  "#84cc16",
+  V4:   "#eab308", V5:  "#f59e0b", "V5+": "#d97706", V6:  "#f97316",
+  V7:   "#ea580c", V8:  "#ef4444", "V8+": "#dc2626", V9:  "#b91c1c",
+  V10:  "#991b1b", V11: "#be123c", V12: "#9333ea",  V13: "#7e22ce",
+  V14:  "#db2777", V15: "#be185d", V16: "#86198f",  V17: "#4a044e",
+  V18:  "#1c1917",
+};
+
+function TickTooltip({ ticks }: { ticks: UserTick[] }) {
+  const shown = ticks.slice(0, 5);
+  return (
+    <div className="bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 shadow-2xl min-w-[160px] max-w-[260px] w-max">
+      {shown.map((tick, i) => (
+        <div key={tick.id}>
+          {i > 0 && <div className="border-t border-stone-800 my-1.5" />}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span
+              className="text-white text-[10px] font-bold px-1.5 py-0.5 rounded inline-block"
+              style={{ background: GRADE_HEX[tick.grade] ?? "#78716c" }}
+            >
+              {tick.grade}
+            </span>
+            <span className="text-white text-xs font-semibold leading-snug">{tick.climbName}</span>
+          </div>
+          <div className="text-stone-500 text-[10px] mt-0.5">
+            {[
+              tick.boardName && `${tick.boardName}${tick.angle != null ? ` · ${tick.angle}°` : ""}`,
+              tick.attempts != null ? `${tick.attempts} att.` : null,
+              timeAgo(tick.date.slice(0, 10)),
+            ].filter(Boolean).join(" · ")}
+          </div>
+        </div>
+      ))}
+      {ticks.length > 5 && (
+        <div className="text-stone-600 text-[10px] mt-1.5">+{ticks.length - 5} more</div>
+      )}
+    </div>
+  );
+}
+
+function GradeCellWithTooltip({ grade, ticks }: { grade: Grade; ticks: UserTick[] }) {
+  return (
+    <div className="relative group inline-flex cursor-default">
+      <GradeBadge grade={grade} size="md" />
+      {ticks.length > 0 && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50
+                        opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <TickTooltip ticks={ticks} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function UserProfilePage() {
   const params = useParams<{ handle: string }>();
   const handle = params.handle;
@@ -106,15 +162,33 @@ export default function UserProfilePage() {
         ALL_GRADES.indexOf(t.grade) > ALL_GRADES.indexOf(best.grade) ? t : best
       ).grade
     : null;
+  const hardestTicks = hardestTickGrade
+    ? sentTicks
+        .filter((t) => t.grade === hardestTickGrade)
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 5)
+    : [];
 
-  // Hardest completed grade per board, from sent ticks
-  const hardestByBoard: Record<string, Grade> = {};
+  // Hardest completed grade per board, with up to 5 ticks for tooltip
+  const hardestByBoard: Record<string, { grade: Grade; ticks: UserTick[] }> = {};
   for (const tick of sentTicks) {
     if (!tick.boardName) continue;
     const current = hardestByBoard[tick.boardName];
-    if (!current || ALL_GRADES.indexOf(tick.grade) > ALL_GRADES.indexOf(current)) {
-      hardestByBoard[tick.boardName] = tick.grade;
+    if (!current || ALL_GRADES.indexOf(tick.grade) > ALL_GRADES.indexOf(current.grade)) {
+      hardestByBoard[tick.boardName] = { grade: tick.grade, ticks: [] };
     }
+  }
+  for (const tick of sentTicks) {
+    if (!tick.boardName) continue;
+    const entry = hardestByBoard[tick.boardName];
+    if (entry && tick.grade === entry.grade) entry.ticks.push(tick);
+  }
+  for (const key of Object.keys(hardestByBoard)) {
+    const entry = hardestByBoard[key];
+    hardestByBoard[key] = {
+      ...entry,
+      ticks: [...entry.ticks].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5),
+    };
   }
 
   async function handleFollow() {
@@ -217,7 +291,7 @@ export default function UserProfilePage() {
           {hardestTickGrade ? (
             <>
               <div className="flex justify-center mb-1">
-                <GradeBadge grade={hardestTickGrade} size="md" />
+                <GradeCellWithTooltip grade={hardestTickGrade} ticks={hardestTicks} />
               </div>
               <div className="text-stone-400 text-xs mt-0.5">Hardest Tick</div>
             </>
@@ -234,15 +308,15 @@ export default function UserProfilePage() {
       {/* Hardest completed grade per board type */}
       {Object.keys(hardestByBoard).length > 0 && (
         <section className="mt-8">
-          <h2 className="text-orange-400 font-semibold text-lg mb-3">Hardest Completed</h2>
+          <h2 className="text-orange-400 font-semibold text-lg mb-3">Hardest Tick by Board</h2>
           <div className="flex flex-wrap gap-3">
-            {Object.entries(hardestByBoard).map(([board, grade]) => (
+            {Object.entries(hardestByBoard).map(([board, { grade, ticks: boardTicks }]) => (
               <div
                 key={board}
                 className="bg-stone-800 border border-stone-700 rounded-lg px-4 py-3 flex items-center gap-3"
               >
                 <span className="text-stone-400 text-sm">{board}</span>
-                <GradeBadge grade={grade} size="md" />
+                <GradeCellWithTooltip grade={grade} ticks={boardTicks} />
               </div>
             ))}
           </div>
