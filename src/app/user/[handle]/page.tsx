@@ -643,6 +643,7 @@ function ImportSection({
   const [mbImporting, setMbImporting] = useState(false);
   const [mbResult, setMbResult] = useState<MoonboardImportResult | null>(null);
   const [mbError, setMbError] = useState<string | null>(null);
+  const [mbBoardName, setMbBoardName] = useState<string>(MOONBOARD_OPTIONS[0].boardName);
   const mbFileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -693,7 +694,7 @@ function ImportSection({
         return;
       }
 
-      const res = await importMoonboardData(handle, parsed);
+      const res = await importMoonboardData(handle, parsed, mbBoardName);
       setMbResult(res);
       onSuccess();
     } catch {
@@ -791,9 +792,22 @@ function ImportSection({
           <p className="text-stone-300 text-sm font-medium">Upload Moonboard Data</p>
           <p className="text-stone-400 text-xs mt-1 leading-relaxed">
             Upload the JSON file you exported from moonboard.com using the snippet above
-            to import your ticks. New climbs will be created on Moonboard 2016 at 40°
-            if they don&apos;t already exist.
+            to import your ticks. Select the same board type you used when exporting.
           </p>
+        </div>
+
+        <div>
+          <label className="text-stone-300 text-sm font-medium block mb-1.5">Board</label>
+          <select
+            value={mbBoardName}
+            onChange={(e) => setMbBoardName(e.target.value)}
+            disabled={mbImporting}
+            className="bg-stone-900 border border-stone-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors disabled:opacity-50"
+          >
+            {MOONBOARD_OPTIONS.map((opt) => (
+              <option key={opt.boardName} value={opt.boardName}>{opt.label}</option>
+            ))}
+          </select>
         </div>
 
         <label className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
@@ -877,7 +891,8 @@ function ImportSection({
 // ─── Moonboard export ─────────────────────────────────────────────────────────
 
 const MOONBOARD_OPTIONS = [
-  { label: "Moonboard 2016 @ 40 degrees", filter: "setupId~eq~'1'~and~Configuration~eq~3" },
+  { label: "Moonboard 2016 @ 40 degrees", filter: "setupId~eq~'1'~and~Configuration~eq~3",  boardName: "Moonboard 2016" },
+  { label: "Moonboard 2024 @ 40 degrees", filter: "setupId~eq~'21'~and~Configuration~eq~3", boardName: "Moonboard 2024" },
 ] as const;
 
 function MoonboardExportSection() {

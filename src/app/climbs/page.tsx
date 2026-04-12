@@ -400,7 +400,7 @@ export default function ClimbsPage() {
               </label>
               <div className="my-1 border-t border-stone-700" />
               {boards.map((b) => (
-                <label key={b.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-stone-700/60 cursor-pointer select-none">
+                <div key={b.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-stone-700/60 select-none">
                   <input
                     type="checkbox"
                     checked={boardIds.includes(b.id)}
@@ -409,10 +409,15 @@ export default function ClimbsPage() {
                         ? [...boardIds, b.id]
                         : boardIds.filter((id) => id !== b.id))
                     }
-                    className="accent-orange-500 w-3.5 h-3.5"
+                    className="accent-orange-500 w-3.5 h-3.5 cursor-pointer shrink-0"
                   />
-                  <span className="text-sm text-stone-300">{b.name}</span>
-                </label>
+                  <button
+                    onClick={() => { setBoardIds([b.id]); setBoardOpen(false); }}
+                    className="text-sm text-stone-300 hover:text-white text-left flex-1 cursor-pointer"
+                  >
+                    {b.name}
+                  </button>
+                </div>
               ))}
             </div>
           )}

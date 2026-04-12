@@ -190,6 +190,11 @@ export async function POST(
     return NextResponse.json({ error: "Body must contain an 'entries' array" }, { status: 400 });
   }
 
+  // Optional board-name override supplied by the client (e.g. "Moonboard 2024").
+  // When present, every record in this import is attributed to that board rather
+  // than relying solely on Problem.Holdsetup.Description from the export data.
+  const boardNameOverride = req.nextUrl.searchParams.get("boardName") ?? undefined;
+
   // Load all existing boards once; cache by lowercase name → id so lookups are O(1).
   const existingBoards = await db("boards").select("id", "name") as { id: string; name: string }[];
   const boardCache = new Map<string, string>(
@@ -224,12 +229,14 @@ export async function POST(
       const vGrade = fontToVGrade(rawGrade);
       if (!vGrade) { skipDetails.unknownGrade++; continue; }
 
-      // Resolve board by name from Problem.Holdsetup.Description; create if absent.
+      // Resolve board: prefer the client-supplied override, then fall back to the
+      // per-record Holdsetup.Description, then to "Moonboard 2016".
       const holdsetupName =
-        typeof record.Problem?.Holdsetup?.Description === "string" &&
-        record.Problem.Holdsetup.Description.trim()
+        boardNameOverride ??
+        (typeof record.Problem?.Holdsetup?.Description === "string" &&
+         record.Problem.Holdsetup.Description.trim()
           ? record.Problem.Holdsetup.Description.trim()
-          : "Moonboard 2016";
+          : "Moonboard 2016");
       const boardKey = holdsetupName.toLowerCase();
       let boardId = boardCache.get(boardKey);
       if (!boardId) {
