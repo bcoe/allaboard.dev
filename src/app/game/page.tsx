@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { getLeaderboard, type LeaderboardEntry, type HardestGradeTick } from "@/lib/db";
-import { Grade } from "@/lib/types";
-import { timeAgo } from "@/lib/utils";
+import { getLeaderboard, getBoards, type LeaderboardEntry, type HardestGradeTick } from "@/lib/db";
+import { Board, Grade } from "@/lib/types";
+import { ALL_GRADES, gradePoints, timeAgo } from "@/lib/utils";
 import GradeBadge from "@/components/GradeBadge";
 import UserAvatar from "@/components/UserAvatar";
 
@@ -98,6 +98,70 @@ function HardestGradeCell({ grade, ticks }: { grade: string | null; ticks: Harde
   );
 }
 
+// ── Side panel: board multipliers ────────────────────────────────────────────
+
+function BoardMultipliersCard({ boards }: { boards: Board[] }) {
+  const sorted = [...boards].sort((a, b) =>
+    b.relativeDifficulty - a.relativeDifficulty || a.name.localeCompare(b.name),
+  );
+  return (
+    <div className="bg-stone-900 border border-stone-700 rounded-xl p-4">
+      <h2 className="text-orange-400 font-semibold text-sm mb-3">Board Multiplier</h2>
+      {sorted.length === 0 ? (
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-4 bg-stone-800 rounded animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {sorted.map((board) => (
+            <div key={board.id} className="flex items-center justify-between gap-2">
+              <span className="text-stone-400 text-xs truncate" title={board.name}>{board.name}</span>
+              <span className="text-white text-xs font-mono font-bold shrink-0">
+                ×{board.relativeDifficulty.toFixed(2)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Side panel: grade points ──────────────────────────────────────────────────
+
+function GradePointsCard() {
+  return (
+    <div className="bg-stone-900 border border-stone-700 rounded-xl p-4">
+      <h2 className="text-orange-400 font-semibold text-sm mb-3">Grade Points</h2>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5 mb-2">
+          <span className="text-stone-600 text-[10px] w-9 shrink-0" />
+          <span className="text-stone-600 text-[10px]">Base</span>
+          <span className="text-stone-600 text-[10px] ml-auto">⚡Flash</span>
+        </div>
+        {ALL_GRADES.map((grade) => {
+          const { base, flash } = gradePoints(grade);
+          if (base === 0) return null;
+          return (
+            <div key={grade} className="flex items-center gap-1.5">
+              <span
+                className="text-white text-[10px] font-bold px-1 py-0.5 rounded shrink-0 w-9 text-center"
+                style={{ background: GRADE_HEX[grade] ?? "#78716c" }}
+              >
+                {grade}
+              </span>
+              <span className="text-stone-300 text-xs tabular-nums">{base}</span>
+              <span className="text-stone-500 text-[10px] tabular-nums ml-auto">+{flash}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Leaderboard card ──────────────────────────────────────────────────────────
 
 function LeaderboardCard({ entry, rank }: { entry: LeaderboardEntry; rank: number }) {
@@ -175,45 +239,68 @@ function LeaderboardCard({ entry, rank }: { entry: LeaderboardEntry; rank: numbe
 export default function GamePage() {
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
   const [error, setError]     = useState<string | null>(null);
+  const [boards, setBoards]   = useState<Board[]>([]);
 
   useEffect(() => {
     getLeaderboard()
       .then(setEntries)
       .catch(() => setError("Failed to load leaderboard."));
+    getBoards()
+      .then(setBoards)
+      .catch(() => {});
   }, []);
 
   return (
-    <main className="max-w-3xl mx-auto px-4 py-10">
-      <h1 className="text-3xl font-black text-white mb-1">Climbing Game</h1>
-      <p className="text-stone-400 text-sm mb-8">
-        Climbers ranked by points. Earn points by sending climbs — harder grades,
-        tougher boards, and flashes score higher.
-      </p>
+    <main className="max-w-[1200px] mx-auto px-4 py-10">
 
-      {error && (
-        <p className="text-red-400 text-sm">{error}</p>
-      )}
+      {/* ── 3-col grid: side panels in margins on lg+, stacked below on mobile ── */}
+      <div className="lg:grid lg:grid-cols-[200px_1fr_200px] lg:gap-6 lg:items-start">
 
-      {!entries && !error && (
-        <div className="space-y-3">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="bg-stone-800 border border-stone-700 rounded-xl px-5 py-4 h-20 animate-pulse" />
-          ))}
-        </div>
-      )}
+        {/* Center column: heading + leaderboard (DOM-first so mobile shows it on top) */}
+        <div className="lg:col-start-2 lg:row-start-1">
+          <h1 className="text-3xl font-black text-white mb-1">Climbing Game</h1>
+          <p className="text-stone-400 text-sm mb-8">
+            Climbers ranked by points. Earn points by sending climbs — harder grades,
+            tougher boards, and flashes score higher.
+          </p>
 
-      {entries && (
-        <div className="space-y-3">
-          {entries.map((entry, i) => (
-            <LeaderboardCard key={entry.id} entry={entry} rank={i + 1} />
-          ))}
-          {entries.length === 0 && (
-            <p className="text-stone-500 text-sm text-center py-16">
-              No climbers yet.
-            </p>
+          {error && (
+            <p className="text-red-400 text-sm">{error}</p>
+          )}
+
+          {!entries && !error && (
+            <div className="space-y-3">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="bg-stone-800 border border-stone-700 rounded-xl px-5 py-4 h-20 animate-pulse" />
+              ))}
+            </div>
+          )}
+
+          {entries && (
+            <div className="space-y-3">
+              {entries.map((entry, i) => (
+                <LeaderboardCard key={entry.id} entry={entry} rank={i + 1} />
+              ))}
+              {entries.length === 0 && (
+                <p className="text-stone-500 text-sm text-center py-16">
+                  No climbers yet.
+                </p>
+              )}
+            </div>
           )}
         </div>
-      )}
+
+        {/* Side panels: side-by-side below the list on mobile, in margins on lg+ */}
+        <div className="mt-8 flex gap-4 lg:contents">
+          <div className="flex-1 lg:col-start-1 lg:row-start-1">
+            <BoardMultipliersCard boards={boards} />
+          </div>
+          <div className="flex-1 lg:col-start-3 lg:row-start-1">
+            <GradePointsCard />
+          </div>
+        </div>
+
+      </div>
     </main>
   );
 }

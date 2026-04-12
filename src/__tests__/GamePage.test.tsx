@@ -1,9 +1,10 @@
 import { render, screen, act } from "@testing-library/react";
 import GamePage from "@/app/game/page";
 import Navbar from "@/components/Navbar";
-import { getLeaderboard } from "@/lib/db";
+import { getLeaderboard, getBoards } from "@/lib/db";
 import { useAuth } from "@/lib/auth-context";
 import type { LeaderboardEntry } from "@/lib/db/remote";
+import type { Board } from "@/lib/types";
 
 jest.mock("@/lib/db");
 jest.mock("@/lib/auth-context");
@@ -18,7 +19,8 @@ jest.mock("next/image", () => ({
 }));
 
 const mockGetLeaderboard = jest.mocked(getLeaderboard);
-const mockUseAuth = jest.mocked(useAuth);
+const mockGetBoards      = jest.mocked(getBoards);
+const mockUseAuth        = jest.mocked(useAuth);
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -53,12 +55,22 @@ const fourEntries: LeaderboardEntry[] = [
   makeEntry("diana",    50),
 ];
 
+function makeBoard(id: string, name: string, relativeDifficulty: number): Board {
+  return { id, name, type: "standard", relativeDifficulty };
+}
+
+const twoBoards: Board[] = [
+  makeBoard("kilter",    "Kilter Board",    1.50),
+  makeBoard("moonboard", "Moonboard 2016",  1.20),
+];
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockUseAuth.mockReturnValue({ user: null, loading: false, logout: jest.fn(), updateUser: jest.fn() });
   mockGetLeaderboard.mockResolvedValue(fourEntries);
+  mockGetBoards.mockResolvedValue([]);
 });
 
 // ── Page rendering ────────────────────────────────────────────────────────────
@@ -76,6 +88,7 @@ describe("GamePage — page structure", () => {
 
   it("shows skeleton loading cards before data arrives", () => {
     mockGetLeaderboard.mockReturnValue(new Promise(() => {})); // never resolves
+    mockGetBoards.mockReturnValue(new Promise(() => {}));      // never resolves
     render(<GamePage />);
     expect(document.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
   });
@@ -174,6 +187,42 @@ describe("GamePage — medals", () => {
     await act(async () => { render(<GamePage />); });
     // rank-1 still gets a medal (top of the board)
     expect(screen.getAllByTestId("medal-badge")).toHaveLength(1);
+  });
+});
+
+// ── Side panels ───────────────────────────────────────────────────────────────
+
+describe("GamePage — side panels", () => {
+  it("renders the 'Board Multiplier' panel heading", async () => {
+    await act(async () => { render(<GamePage />); });
+    expect(screen.getByText("Board Multiplier")).toBeInTheDocument();
+  });
+
+  it("renders the 'Grade Points' panel heading", async () => {
+    await act(async () => { render(<GamePage />); });
+    expect(screen.getByText("Grade Points")).toBeInTheDocument();
+  });
+
+  it("shows board names and formatted multipliers when boards load", async () => {
+    mockGetBoards.mockResolvedValue(twoBoards);
+    await act(async () => { render(<GamePage />); });
+    expect(screen.getByText("Kilter Board")).toBeInTheDocument();
+    expect(screen.getByText("×1.50")).toBeInTheDocument();
+    expect(screen.getByText("Moonboard 2016")).toBeInTheDocument();
+    expect(screen.getByText("×1.20")).toBeInTheDocument();
+  });
+
+  it("shows skeleton rows while boards are still loading", () => {
+    mockGetBoards.mockReturnValue(new Promise(() => {}));      // never resolves
+    mockGetLeaderboard.mockReturnValue(new Promise(() => {})); // never resolves
+    render(<GamePage />);
+    expect(document.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+  });
+
+  it("renders grade rows in the Grade Points panel (V0 present, not in leaderboard fixture)", async () => {
+    await act(async () => { render(<GamePage />); });
+    // V0 only appears in the grade-points table — the leaderboard fixture uses V6
+    expect(screen.getAllByText("V0").length).toBeGreaterThan(0);
   });
 });
 
