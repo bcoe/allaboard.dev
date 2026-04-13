@@ -303,3 +303,8 @@ export async function recalculateBoardDifficulty(): Promise<BoardDifficultyResul
     method: "POST",
   });
 }
+
+export async function getSetterSuggestions(q: string): Promise<string[]> {
+  if (!q.trim()) return [];
+  return api<string[]>(`/api/setters?q=${encodeURIComponent(q)}&limit=8`);
+}

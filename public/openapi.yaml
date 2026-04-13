@@ -576,6 +576,27 @@ paths:
       security:
         - apiKeyAuth: []
         - cookieAuth: []
+  /api/setters:
+    get:
+      summary: Return setter names that match a prefix/substring query.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: case-insensitive substring to match against setter names.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: max results to return (default 10, max 50).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of matching setter name strings, ordered alphabetically.
+        "500":
+          description: database error.
   /api/stats/{userId}:
     get:
       summary: Compute and return climbing statistics for a user.

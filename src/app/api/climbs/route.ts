@@ -224,6 +224,7 @@ export async function POST(req: NextRequest) {
     }
 
     const id = uuidv4();
+    const setterName = setter?.trim() || null;
     await db("climbs").insert({
       id,
       name:        name.trim(),
@@ -232,9 +233,17 @@ export async function POST(req: NextRequest) {
       angle:       resolvedAngle,
       description: description?.trim() ?? "",
       author:      userId,
-      setter:      setter?.trim() || null,
+      setter:      setterName,
       sends:       0,
     });
+
+    // Keep the setters lookup table in sync
+    if (setterName) {
+      await db.raw(
+        "INSERT INTO setters (name) VALUES (?) ON CONFLICT (name) DO NOTHING",
+        [setterName],
+      );
+    }
 
     const row = await db("climbs")
       .select("climbs.*", "boards.name as board_name")
