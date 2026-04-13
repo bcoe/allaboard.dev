@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Grade, Board } from "@/lib/types";
 import { createClimb } from "@/lib/db";
@@ -116,7 +116,7 @@ function SetterInput({ defaultValue = "" }: SetterInputProps) {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-export default function NewClimbPage() {
+function NewClimbPageInner() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const initialName    = searchParams.get("name") ?? "";
@@ -314,5 +314,13 @@ export default function NewClimbPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+export default function NewClimbPage() {
+  return (
+    <Suspense fallback={<div className="text-stone-500 text-center py-16">Loading…</div>}>
+      <NewClimbPageInner />
+    </Suspense>
   );
 }
