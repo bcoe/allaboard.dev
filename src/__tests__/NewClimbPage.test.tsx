@@ -61,3 +61,42 @@ describe("NewClimbPage — name pre-population from ?name= param", () => {
     expect(screen.getByPlaceholderText("e.g. The Crimson Project")).toHaveValue("V&A Problem");
   });
 });
+
+// ── Board pre-selection ───────────────────────────────────────────────────────
+
+const twoBoards = [
+  { id: "kilter",    name: "Kilter Board",    type: "standard", relativeDifficulty: 1.5 },
+  { id: "moonboard", name: "Moonboard 2016",  type: "standard", relativeDifficulty: 1.2 },
+];
+
+describe("NewClimbPage — board pre-selection", () => {
+  it("pre-selects the board from ?boardId= when it matches a loaded board", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (global as any).fetch = jest.fn().mockResolvedValue({ json: () => Promise.resolve(twoBoards) });
+    mockUseSearchParams.mockReturnValue(
+      new URLSearchParams("boardId=moonboard") as unknown as ReturnType<typeof useSearchParams>,
+    );
+    await act(async () => { render(<NewClimbPage />); });
+    expect(screen.getByRole("radio", { name: "Moonboard 2016" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Kilter Board" })).not.toBeChecked();
+  });
+
+  it("falls back to the user's home board when no ?boardId= param is present", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (global as any).fetch = jest.fn().mockResolvedValue({ json: () => Promise.resolve(twoBoards) });
+    // no boardId param — default fetch returns both boards; user.homeBoard = "Kilter Board"
+    await act(async () => { render(<NewClimbPage />); });
+    expect(screen.getByRole("radio", { name: "Kilter Board" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Moonboard 2016" })).not.toBeChecked();
+  });
+
+  it("ignores an unrecognised ?boardId= and falls back to the user's home board", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (global as any).fetch = jest.fn().mockResolvedValue({ json: () => Promise.resolve(twoBoards) });
+    mockUseSearchParams.mockReturnValue(
+      new URLSearchParams("boardId=unknown-board") as unknown as ReturnType<typeof useSearchParams>,
+    );
+    await act(async () => { render(<NewClimbPage />); });
+    expect(screen.getByRole("radio", { name: "Kilter Board" })).toBeChecked();
+  });
+});
