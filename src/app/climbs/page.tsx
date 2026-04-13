@@ -166,21 +166,11 @@ export default function ClimbsPage() {
         />
       )}
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-white">Climbs</h1>
-          <p className="text-stone-400 mt-1">
-            {loading ? "Loading…" : `${total} climb${total !== 1 ? "s" : ""}`}
-          </p>
-        </div>
-        {user && (
-          <Link
-            href="/climbs/new"
-            className="bg-orange-500 hover:bg-orange-400 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-          >
-            + Submit Climb
-          </Link>
-        )}
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-white">Climbs</h1>
+        <p className="text-stone-400 mt-1">
+          {loading ? "Loading…" : `${total} climb${total !== 1 ? "s" : ""}`}
+        </p>
       </div>
 
       {/* Search + filter row */}
@@ -428,7 +418,19 @@ export default function ClimbsPage() {
       {loading ? (
         <div className="text-center py-16 text-stone-500">Loading…</div>
       ) : climbs.length === 0 ? (
-        <div className="text-center py-16 text-stone-500">No climbs match these filters.</div>
+        <div className="text-center py-16">
+          <p className="text-stone-500">
+            {query ? `No results for "${query}".` : "No climbs match these filters."}
+          </p>
+          {query && user && (
+            <Link
+              href={`/climbs/new?name=${encodeURIComponent(query)}`}
+              className="mt-3 inline-flex items-center gap-1 text-orange-400 hover:text-orange-300 text-sm font-medium transition-colors"
+            >
+              Create the climb &ldquo;<span className="text-white font-semibold">{query}</span>&rdquo; →
+            </Link>
+          )}
+        </div>
       ) : (
         <>
           <div className="flex flex-col gap-4">
@@ -469,6 +471,17 @@ export default function ClimbsPage() {
             </div>
           )}
         </>
+      )}
+
+      {user && !(climbs.length === 0 && query) && (
+        <div className="flex justify-end mt-6">
+          <Link
+            href="/climbs/new"
+            className="text-stone-500 hover:text-stone-300 text-sm transition-colors"
+          >
+            + Submit climb
+          </Link>
+        </div>
       )}
     </div>
   );

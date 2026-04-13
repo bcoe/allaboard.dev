@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Grade, Board } from "@/lib/types";
 import { createClimb } from "@/lib/db";
 import { ALL_GRADES } from "@/lib/utils";
@@ -9,7 +9,9 @@ import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
 
 export default function NewClimbPage() {
-  const router  = useRouter();
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+  const initialName  = searchParams.get("name") ?? "";
   const { user, loading } = useAuth();
 
   const [boards, setBoards]           = useState<Board[]>([]);
@@ -97,6 +99,7 @@ export default function NewClimbPage() {
             type="text"
             name="name"
             required
+            defaultValue={initialName}
             placeholder="e.g. The Crimson Project"
             className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2.5 text-white placeholder:text-stone-500 focus:outline-none focus:border-orange-500 transition-colors"
           />
