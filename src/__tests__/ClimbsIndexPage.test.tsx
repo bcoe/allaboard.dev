@@ -104,6 +104,28 @@ describe("ClimbsPage — Create the climb prompt", () => {
     await search("Nonexistent Route");
     expect(screen.getByText(/No results for "Nonexistent Route"/)).toBeInTheDocument();
   });
+
+  it("appends &boardId= to the link when exactly one board is selected", async () => {
+    // user.homeBoard = "Kilter Board" → auto-selects kilter when boards load
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (global as any).fetch = jest.fn().mockResolvedValue({
+      json: () => Promise.resolve([
+        { id: "kilter", name: "Kilter Board", type: "standard", relativeDifficulty: 1.0 },
+      ]),
+    });
+    await renderPage();
+    await search("Nonexistent");
+    const link = screen.getByRole("link", { name: /Create the climb/i });
+    expect(link).toHaveAttribute("href", "/climbs/new?name=Nonexistent&boardId=kilter");
+  });
+
+  it("omits boardId from the link when no board filter is active", async () => {
+    // default fetch returns no boards → boardIds stays []
+    await renderPage();
+    await search("Nonexistent");
+    const link = screen.getByRole("link", { name: /Create the climb/i });
+    expect(link.getAttribute("href")).not.toContain("boardId");
+  });
 });
 
 // ── "Submit climb" link ────────────────────────────────────────────────────────

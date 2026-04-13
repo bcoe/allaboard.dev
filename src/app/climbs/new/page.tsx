@@ -11,7 +11,8 @@ import Link from "next/link";
 export default function NewClimbPage() {
   const router       = useRouter();
   const searchParams = useSearchParams();
-  const initialName  = searchParams.get("name") ?? "";
+  const initialName    = searchParams.get("name") ?? "";
+  const initialBoardId = searchParams.get("boardId") ?? "";
   const { user, loading } = useAuth();
 
   const [boards, setBoards]           = useState<Board[]>([]);
@@ -25,13 +26,15 @@ export default function NewClimbPage() {
     if (!loading && !user) router.replace("/");
   }, [user, loading, router]);
 
-  // Load boards and pre-select user's home board
+  // Load boards and pre-select: URL boardId param → user's home board → nothing
   useEffect(() => {
     fetch("/api/boards")
       .then((r) => r.json())
       .then((loaded: Board[]) => {
         setBoards(loaded);
-        if (user?.homeBoard) {
+        if (initialBoardId && loaded.find((b) => b.id === initialBoardId)) {
+          setBoardId(initialBoardId);
+        } else if (user?.homeBoard) {
           const match = loaded.find((b) => b.name === user.homeBoard);
           if (match) setBoardId(match.id);
         }

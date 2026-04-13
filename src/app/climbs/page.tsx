@@ -424,7 +424,7 @@ export default function ClimbsPage() {
           </p>
           {query && user && (
             <Link
-              href={`/climbs/new?name=${encodeURIComponent(query)}`}
+              href={`/climbs/new?name=${encodeURIComponent(query)}${boardIds.length === 1 ? `&boardId=${encodeURIComponent(boardIds[0])}` : ""}`}
               className="mt-3 inline-flex items-center gap-1 text-orange-400 hover:text-orange-300 text-sm font-medium transition-colors"
             >
               Create the climb &ldquo;<span className="text-white font-semibold">{query}</span>&rdquo; →
