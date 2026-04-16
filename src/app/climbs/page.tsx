@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Grade, Board } from "@/lib/types";
 import { ALL_GRADES } from "@/lib/utils";
 import { getClimbs, ClimbFilters } from "@/lib/db";
@@ -10,28 +11,39 @@ import TickModal from "@/components/TickModal";
 import Link from "next/link";
 import type { Climb } from "@/lib/types";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE   = 25;
+const DEFAULT_SORT = "sends_desc";
 
-export default function ClimbsPage() {
+// ── Inner page (needs Suspense because it calls useSearchParams) ───────────────
+
+function ClimbsPageInner() {
   const { user } = useAuth();
-  const [climbs, setClimbs]       = useState<Climb[]>([]);
-  const [boards, setBoards]       = useState<Board[]>([]);
-  const [tickTarget, setTickTarget] = useState<{ id: string; name: string } | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [hasMore, setHasMore]     = useState(false);
-  const [total, setTotal]         = useState(0);
-  const [page, setPage]           = useState(1);
-  const [boardsLoaded, setBoardsLoaded] = useState(false);
-  const defaultApplied = useRef(false);
+  const router       = useRouter();
+  const searchParams = useSearchParams();
 
-  // Filter state
-  const [query, setQuery]         = useState("");
-  const [gradeMin, setGradeMin]   = useState<Grade | null>(null);
-  const [gradeMax, setGradeMax]   = useState<Grade | null>(null);
-  const [boardIds, setBoardIds]   = useState<string[]>([]);
-  const [angleMin, setAngleMin]   = useState<string>("");
-  const [angleMax, setAngleMax]   = useState<string>("");
-  const [sort, setSort]           = useState("sends_desc");
+  // ── URL is the source of truth for all filter state ──────────────────────────
+  const urlQuery  = searchParams.get("q") ?? "";
+  const gradeMin  = (searchParams.get("gradeMin") as Grade) || null;
+  const gradeMax  = (searchParams.get("gradeMax") as Grade) || null;
+  const boardIds  = searchParams.get("boards")?.split(",").filter(Boolean) ?? [];
+  const angleMin  = searchParams.get("angleMin") ?? "";
+  const angleMax  = searchParams.get("angleMax") ?? "";
+  const sort      = searchParams.get("sort") ?? DEFAULT_SORT;
+  const page      = Number(searchParams.get("page") ?? "1");
+
+  // ── Non-filter UI state ───────────────────────────────────────────────────────
+  const [climbs, setClimbs]           = useState<Climb[]>([]);
+  const [boards, setBoards]           = useState<Board[]>([]);
+  const [tickTarget, setTickTarget]   = useState<{ id: string; name: string } | null>(null);
+  const [loading, setLoading]         = useState(true);
+  const [hasMore, setHasMore]         = useState(false);
+  const [total, setTotal]             = useState(0);
+  const [boardsLoaded, setBoardsLoaded] = useState(false);
+
+  // Local search input value — debounced before writing to URL
+  const [inputValue, setInputValue]   = useState(urlQuery);
+  const debounceRef                   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const defaultApplied                = useRef(false);
 
   // Dropdown open state
   const [sortOpen, setSortOpen]   = useState(false);
@@ -44,46 +56,70 @@ export default function ClimbsPage() {
   const boardRef = useRef<HTMLDivElement>(null);
   const angleRef = useRef<HTMLDivElement>(null);
 
-  // Load boards once; apply user's home board as default filter on first load
+  // ── URL update helper ─────────────────────────────────────────────────────────
+  function updateParams(
+    updates: Record<string, string | null>,
+    resetPage = true,
+  ) {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === null || value === "") {
+        params.delete(key);
+      } else {
+        params.set(key, value);
+      }
+    }
+    if (resetPage) params.delete("page");
+    // Keep URL clean: omit default sort and page=1
+    if (params.get("sort") === DEFAULT_SORT) params.delete("sort");
+    if (params.get("page") === "1")          params.delete("page");
+    const qs = params.toString();
+    router.replace(`/climbs${qs ? `?${qs}` : ""}`, { scroll: false });
+  }
+
+  // ── Sync search input when URL changes (browser back/forward) ─────────────────
+  useEffect(() => {
+    setInputValue(urlQuery);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlQuery]);
+
+  // ── Load boards; apply home board default on first visit ──────────────────────
   useEffect(() => {
     fetch("/api/boards")
       .then((r) => r.json())
       .then((loaded: Board[]) => {
         setBoards(loaded);
-        if (!defaultApplied.current && user?.homeBoard) {
+        // Only apply default when the URL has no boards param (first/clean visit)
+        if (!defaultApplied.current && !searchParams.get("boards") && user?.homeBoard) {
           const match = loaded.find((b) => b.name === user.homeBoard);
-          if (match) setBoardIds([match.id]);
-          defaultApplied.current = true;
+          if (match) {
+            const params = new URLSearchParams(searchParams.toString());
+            params.set("boards", match.id);
+            if (params.get("sort") === DEFAULT_SORT) params.delete("sort");
+            router.replace(`/climbs?${params.toString()}`, { scroll: false });
+          }
         }
+        defaultApplied.current = true;
         setBoardsLoaded(true);
       })
       .catch(() => { setBoardsLoaded(true); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  function buildFilters(p: number): ClimbFilters {
-    const f: ClimbFilters = { limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE };
-    if (query)    f.q        = query;
-    if (gradeMin) f.gradeMin = gradeMin;
-    if (gradeMax) f.gradeMax = gradeMax;
-    if (boardIds.length) f.boardIds = boardIds;
-    if (angleMin) f.angleMin = Number(angleMin);
-    if (angleMax) f.angleMax = Number(angleMax);
-    if (sort)     f.sort     = sort;
-    return f;
-  }
-
-  // Reset to page 1 when any filter changes
-  useEffect(() => {
-    setPage(1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, gradeMin, gradeMax, boardIds, angleMin, angleMax, sort]);
-
-  // Fetch whenever filters or page change — wait until boards (and default boardId) are set
+  // ── Fetch climbs whenever URL params change ───────────────────────────────────
   useEffect(() => {
     if (!boardsLoaded) return;
+    const f: ClimbFilters = { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE };
+    if (urlQuery)        f.q        = urlQuery;
+    if (gradeMin)        f.gradeMin = gradeMin;
+    if (gradeMax)        f.gradeMax = gradeMax;
+    if (boardIds.length) f.boardIds = boardIds;
+    if (angleMin)        f.angleMin = Number(angleMin);
+    if (angleMax)        f.angleMax = Number(angleMax);
+    if (sort)            f.sort     = sort;
+
     setLoading(true);
-    getClimbs(buildFilters(page))
+    getClimbs(f)
       .then(({ climbs, hasMore, total }) => {
         setClimbs(climbs);
         setHasMore(hasMore);
@@ -92,9 +128,9 @@ export default function ClimbsPage() {
       .catch(() => { setClimbs([]); setHasMore(false); setTotal(0); })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, gradeMin, gradeMax, boardIds, angleMin, angleMax, sort, boardsLoaded, page]);
+  }, [searchParams, boardsLoaded]);
 
-  // Close dropdowns on outside click
+  // ── Close dropdowns on outside click ─────────────────────────────────────────
   useEffect(() => {
     function onMouseDown(e: MouseEvent) {
       if (sortRef.current  && !sortRef.current.contains(e.target as Node))  setSortOpen(false);
@@ -106,38 +142,44 @@ export default function ClimbsPage() {
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, []);
 
-  // ── Grade range helpers ────────────────────────────────────────────────────
+  // ── Search (debounced) ────────────────────────────────────────────────────────
+  function handleQueryChange(value: string) {
+    setInputValue(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      updateParams({ q: value || null });
+    }, 300);
+  }
+
+  // ── Grade range ───────────────────────────────────────────────────────────────
   const minIdx = gradeMin ? ALL_GRADES.indexOf(gradeMin) : -1;
   const maxIdx = gradeMax ? ALL_GRADES.indexOf(gradeMax) : -1;
 
   function handleGradeClick(grade: Grade) {
     const idx = ALL_GRADES.indexOf(grade);
     if (!gradeMin) {
-      setGradeMin(grade);
+      updateParams({ gradeMin: grade, gradeMax: null });
     } else if (!gradeMax) {
       if (idx === minIdx) {
-        setGradeMin(null);
+        updateParams({ gradeMin: null, gradeMax: null });
       } else if (idx < minIdx) {
-        setGradeMin(grade);
-        setGradeMax(gradeMin);
+        updateParams({ gradeMin: grade, gradeMax: gradeMin });
       } else {
-        setGradeMax(grade);
+        updateParams({ gradeMin, gradeMax: grade });
       }
     } else {
-      setGradeMin(grade);
-      setGradeMax(null);
+      updateParams({ gradeMin: grade, gradeMax: null });
     }
   }
 
   function isInRange(grade: Grade): boolean {
     if (minIdx === -1) return false;
     const idx = ALL_GRADES.indexOf(grade);
-    const lo = minIdx;
-    const hi = maxIdx === -1 ? minIdx : maxIdx;
-    return idx >= lo && idx <= hi;
+    const hi  = maxIdx === -1 ? minIdx : maxIdx;
+    return idx >= minIdx && idx <= hi;
   }
 
-  // ── Labels ─────────────────────────────────────────────────────────────────
+  // ── Labels ────────────────────────────────────────────────────────────────────
   const gradeLabel =
     !gradeMin ? "Grade" :
     !gradeMax ? gradeMin :
@@ -149,7 +191,8 @@ export default function ClimbsPage() {
     `${boardIds.length} boards`;
 
   const hasAngleFilter = angleMin !== "" || angleMax !== "";
-  const angleLabel     = !hasAngleFilter ? "Angle" :
+  const angleLabel =
+    !hasAngleFilter ? "Angle" :
     angleMin && angleMax ? `${angleMin}°–${angleMax}°` :
     angleMin ? `≥${angleMin}°` : `≤${angleMax}°`;
 
@@ -165,6 +208,7 @@ export default function ClimbsPage() {
           onClose={() => setTickTarget(null)}
         />
       )}
+
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white">Climbs</h1>
@@ -189,7 +233,7 @@ export default function ClimbsPage() {
               grade_desc:       "Hardest First",
               grade_asc:        "Easiest First",
               has_video:        "Has Video",
-            }[sort]}
+            }[sort] ?? "Most Repeats"}
             <svg className="w-3.5 h-3.5 opacity-70" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path d="m6 9 6 6 6-6"/>
             </svg>
@@ -201,7 +245,7 @@ export default function ClimbsPage() {
                 <span className="text-white text-sm font-semibold">Sort by</span>
               </div>
               {([
-                { value: "sends_desc",      label: "Most Repeats" },
+                { value: "sends_desc",       label: "Most Repeats" },
                 { value: "star_rating_desc", label: "Top Rated" },
                 { value: "grade_desc",       label: "Hardest First" },
                 { value: "grade_asc",        label: "Easiest First" },
@@ -209,7 +253,7 @@ export default function ClimbsPage() {
               ] as const).map(({ value, label }) => (
                 <button
                   key={value}
-                  onClick={() => { setSort(value); setSortOpen(false); }}
+                  onClick={() => { updateParams({ sort: value }); setSortOpen(false); }}
                   className={`w-full px-2 py-2.5 rounded-lg text-sm transition-colors text-left ${
                     sort === value ? "bg-stone-800 text-orange-400 font-medium" : "text-stone-300 hover:bg-stone-800"
                   }`}
@@ -232,13 +276,13 @@ export default function ClimbsPage() {
           <input
             type="text"
             placeholder="Search climbs…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={inputValue}
+            onChange={(e) => handleQueryChange(e.target.value)}
             className="w-full bg-stone-800 border border-stone-700 rounded-lg pl-9 pr-4 py-2.5 text-white placeholder:text-stone-500 focus:outline-none focus:border-orange-500 transition-colors"
           />
-          {query && (
+          {inputValue && (
             <button
-              onClick={() => setQuery("")}
+              onClick={() => handleQueryChange("")}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 hover:text-white transition-colors"
             >
               ✕
@@ -268,7 +312,7 @@ export default function ClimbsPage() {
                 <span className="text-white text-sm font-semibold">Grade Range</span>
                 {hasGradeFilter && (
                   <button
-                    onClick={() => { setGradeMin(null); setGradeMax(null); }}
+                    onClick={() => updateParams({ gradeMin: null, gradeMax: null })}
                     className="text-xs text-orange-400 hover:text-orange-300 transition-colors"
                   >
                     Clear
@@ -282,7 +326,7 @@ export default function ClimbsPage() {
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {ALL_GRADES.map((g) => {
-                  const inRange   = isInRange(g);
+                  const inRange    = isInRange(g);
                   const isEndpoint = g === gradeMin || g === gradeMax;
                   return (
                     <button
@@ -327,7 +371,7 @@ export default function ClimbsPage() {
                 <span className="text-white text-sm font-semibold">Angle (degrees)</span>
                 {hasAngleFilter && (
                   <button
-                    onClick={() => { setAngleMin(""); setAngleMax(""); }}
+                    onClick={() => updateParams({ angleMin: null, angleMax: null })}
                     className="text-xs text-orange-400 hover:text-orange-300 transition-colors"
                   >
                     Clear
@@ -340,7 +384,7 @@ export default function ClimbsPage() {
                   min={0} max={90}
                   placeholder="Min"
                   value={angleMin}
-                  onChange={(e) => setAngleMin(e.target.value)}
+                  onChange={(e) => updateParams({ angleMin: e.target.value || null })}
                   className="w-full bg-stone-800 border border-stone-700 rounded-lg px-2 py-2 text-white text-sm placeholder:text-stone-600 focus:outline-none focus:border-orange-500 transition-colors"
                 />
                 <span className="text-stone-500 text-sm shrink-0">–</span>
@@ -349,7 +393,7 @@ export default function ClimbsPage() {
                   min={0} max={90}
                   placeholder="Max"
                   value={angleMax}
-                  onChange={(e) => setAngleMax(e.target.value)}
+                  onChange={(e) => updateParams({ angleMax: e.target.value || null })}
                   className="w-full bg-stone-800 border border-stone-700 rounded-lg px-2 py-2 text-white text-sm placeholder:text-stone-600 focus:outline-none focus:border-orange-500 transition-colors"
                 />
               </div>
@@ -378,12 +422,11 @@ export default function ClimbsPage() {
 
           {boardOpen && (
             <div className="absolute right-0 top-full mt-2 z-30 bg-stone-800 border border-stone-700 rounded-lg shadow-2xl py-1 min-w-[200px]">
-              {/* "All boards" clears the selection */}
               <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-stone-700/60 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={boardIds.length === 0}
-                  onChange={() => setBoardIds([])}
+                  onChange={() => updateParams({ boards: null })}
                   className="accent-orange-500 w-3.5 h-3.5"
                 />
                 <span className="text-sm text-stone-300">All boards</span>
@@ -394,15 +437,16 @@ export default function ClimbsPage() {
                   <input
                     type="checkbox"
                     checked={boardIds.includes(b.id)}
-                    onChange={(e) =>
-                      setBoardIds(e.target.checked
+                    onChange={(e) => {
+                      const next = e.target.checked
                         ? [...boardIds, b.id]
-                        : boardIds.filter((id) => id !== b.id))
-                    }
+                        : boardIds.filter((id) => id !== b.id);
+                      updateParams({ boards: next.join(",") || null });
+                    }}
                     className="accent-orange-500 w-3.5 h-3.5 cursor-pointer shrink-0"
                   />
                   <button
-                    onClick={() => { setBoardIds([b.id]); setBoardOpen(false); }}
+                    onClick={() => { updateParams({ boards: b.id }); setBoardOpen(false); }}
                     className="text-sm text-stone-300 hover:text-white text-left flex-1 cursor-pointer"
                   >
                     {b.name}
@@ -420,14 +464,14 @@ export default function ClimbsPage() {
       ) : climbs.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-stone-500">
-            {query ? `No results for "${query}".` : "No climbs match these filters."}
+            {urlQuery ? `No results for "${urlQuery}".` : "No climbs match these filters."}
           </p>
-          {query && user && (
+          {urlQuery && user && (
             <Link
-              href={`/climbs/new?name=${encodeURIComponent(query)}${boardIds.length === 1 ? `&boardId=${encodeURIComponent(boardIds[0])}` : ""}`}
+              href={`/climbs/new?name=${encodeURIComponent(urlQuery)}${boardIds.length === 1 ? `&boardId=${encodeURIComponent(boardIds[0])}` : ""}`}
               className="mt-3 inline-flex items-center gap-1 text-orange-400 hover:text-orange-300 text-sm font-medium transition-colors"
             >
-              Create the climb &ldquo;<span className="text-white font-semibold">{query}</span>&rdquo; →
+              Create the climb &ldquo;<span className="text-white font-semibold">{urlQuery}</span>&rdquo; →
             </Link>
           )}
         </div>
@@ -446,7 +490,7 @@ export default function ClimbsPage() {
           {(page > 1 || hasMore) && (
             <div className="flex items-center justify-center gap-3 mt-6">
               <button
-                onClick={() => setPage((p) => p - 1)}
+                onClick={() => updateParams({ page: String(page - 1) }, false)}
                 disabled={page === 1}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-stone-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 aria-label="Previous page"
@@ -458,7 +502,7 @@ export default function ClimbsPage() {
               </button>
               <span className="text-stone-500 text-sm">{page}</span>
               <button
-                onClick={() => setPage((p) => p + 1)}
+                onClick={() => updateParams({ page: String(page + 1) }, false)}
                 disabled={!hasMore}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-stone-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 aria-label="Next page"
@@ -473,7 +517,7 @@ export default function ClimbsPage() {
         </>
       )}
 
-      {user && !(climbs.length === 0 && query) && (
+      {user && !(climbs.length === 0 && urlQuery) && (
         <div className="flex justify-end mt-6">
           <Link
             href="/climbs/new"
@@ -484,5 +528,15 @@ export default function ClimbsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Page shell (Suspense required for useSearchParams) ────────────────────────
+
+export default function ClimbsPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-16 text-stone-500">Loading…</div>}>
+      <ClimbsPageInner />
+    </Suspense>
   );
 }

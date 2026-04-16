@@ -2,6 +2,7 @@ import { render, screen, act, fireEvent } from "@testing-library/react";
 import ClimbsPage from "@/app/climbs/page";
 import { getClimbs } from "@/lib/db";
 import { useAuth } from "@/lib/auth-context";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { User, Climb } from "@/lib/types";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -9,7 +10,9 @@ import type { User, Climb } from "@/lib/types";
 jest.mock("@/lib/db");
 jest.mock("@/lib/auth-context");
 jest.mock("next/navigation", () => ({
-  usePathname: jest.fn().mockReturnValue("/climbs"),
+  usePathname:     jest.fn().mockReturnValue("/climbs"),
+  useRouter:       jest.fn(),
+  useSearchParams: jest.fn(),
 }));
 jest.mock("@/components/ClimbCard", () => ({
   __esModule: true,
@@ -19,8 +22,10 @@ jest.mock("@/components/ClimbCard", () => ({
 }));
 jest.mock("@/components/TickModal", () => ({ __esModule: true, default: () => null }));
 
-const mockGetClimbs = jest.mocked(getClimbs);
-const mockUseAuth   = jest.mocked(useAuth);
+const mockGetClimbs       = jest.mocked(getClimbs);
+const mockUseAuth         = jest.mocked(useAuth);
+const mockUseRouter       = jest.mocked(useRouter);
+const mockUseSearchParams = jest.mocked(useSearchParams);
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -44,24 +49,60 @@ const oneResult  = { climbs: [makeClimb("c1", "Test Problem")], hasMore: false, 
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
+// Mutable URL params — the router.replace mock writes here so the next render
+// sees the same params a real navigation would produce.
+let currentParams = new URLSearchParams();
+
+// Exposed so tests can assert on which URL router.replace was called with.
+let mockReplace: jest.Mock;
+
+// Saved by renderPage() so search() can force a re-render with updated params.
+let rerenderPage: (ui: React.ReactElement) => void = () => {};
+
 beforeEach(() => {
   jest.clearAllMocks();
+  currentParams = new URLSearchParams();
+
+  mockUseSearchParams.mockImplementation(
+    () => currentParams as unknown as ReturnType<typeof useSearchParams>,
+  );
+  mockReplace = jest.fn().mockImplementation((url: string) => {
+    const qs = typeof url === "string" && url.includes("?") ? url.split("?")[1] : "";
+    currentParams = new URLSearchParams(qs);
+    mockUseSearchParams.mockImplementation(
+      () => currentParams as unknown as ReturnType<typeof useSearchParams>,
+    );
+  });
+  mockUseRouter.mockReturnValue({
+    replace: mockReplace,
+    push: jest.fn(),
+  } as unknown as ReturnType<typeof useRouter>);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (global as any).fetch = jest.fn().mockResolvedValue({ json: () => Promise.resolve([]) });
   mockGetClimbs.mockResolvedValue(noResults);
   mockUseAuth.mockReturnValue({ user: loggedInUser, loading: false, logout: jest.fn(), updateUser: jest.fn() });
 });
 
-// helper: render the page and wait for the boards → climbs double-fetch to settle
+// Render and wait for the boards → climbs double-fetch to settle.
 async function renderPage() {
-  await act(async () => { render(<ClimbsPage />); });
+  await act(async () => {
+    const { rerender } = render(<ClimbsPage />);
+    rerenderPage = rerender;
+  });
 }
 
-// helper: type into the search box and wait for the re-fetch
+// Type into the search box, advance the 300 ms debounce, then re-render so the
+// component reads the URL params that router.replace wrote.
 async function search(query: string) {
+  jest.useFakeTimers();
   await act(async () => {
     fireEvent.change(screen.getByPlaceholderText("Search climbs…"), { target: { value: query } });
+    jest.runAllTimers();
   });
+  await act(async () => {}); // flush pending state updates
+  jest.useRealTimers();
+  await act(async () => { rerenderPage(<ClimbsPage />); });
 }
 
 // ── "Create the climb" prompt ─────────────────────────────────────────────────
@@ -160,5 +201,79 @@ describe("ClimbsPage — Submit climb link", () => {
     mockGetClimbs.mockResolvedValue(oneResult);
     await renderPage();
     expect(screen.queryByRole("link", { name: /Submit climb/i })).not.toBeInTheDocument();
+  });
+});
+
+// ── URL state persistence ──────────────────────────────────────────────────────
+
+describe("ClimbsPage — URL state persistence", () => {
+  it("restores search input and passes all URL params to getClimbs on mount", async () => {
+    currentParams = new URLSearchParams("q=arete&gradeMin=V5&gradeMax=V8&angleMin=40&angleMax=50");
+    mockUseSearchParams.mockImplementation(
+      () => currentParams as unknown as ReturnType<typeof useSearchParams>,
+    );
+    await renderPage();
+    expect(screen.getByPlaceholderText("Search climbs…")).toHaveValue("arete");
+    expect(mockGetClimbs).toHaveBeenCalledWith(expect.objectContaining({
+      q: "arete",
+      gradeMin: "V5",
+      gradeMax: "V8",
+      angleMin: 40,
+      angleMax: 50,
+    }));
+  });
+
+  it("writes a non-default sort to the URL when the sort control is changed", async () => {
+    await renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Sort:/i }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Top Rated" }));
+    });
+    expect(mockReplace).toHaveBeenLastCalledWith(
+      expect.stringContaining("sort=star_rating_desc"),
+      expect.objectContaining({ scroll: false }),
+    );
+  });
+
+  it("omits sort from the URL when it equals the default (sends_desc)", async () => {
+    currentParams = new URLSearchParams("sort=grade_asc");
+    mockUseSearchParams.mockImplementation(
+      () => currentParams as unknown as ReturnType<typeof useSearchParams>,
+    );
+    await renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Sort:/i }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Most Repeats" }));
+    });
+    const lastUrl: string = mockReplace.mock.calls[mockReplace.mock.calls.length - 1][0];
+    expect(lastUrl).not.toContain("sort=");
+  });
+
+  it("does not apply the home board default when the URL already has a boards param", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (global as any).fetch = jest.fn().mockResolvedValue({
+      json: () => Promise.resolve([
+        { id: "kilter", name: "Kilter Board",   type: "standard", relativeDifficulty: 1.0 },
+        { id: "moon",   name: "Moonboard 2016", type: "standard", relativeDifficulty: 1.0 },
+      ]),
+    });
+    currentParams = new URLSearchParams("boards=moon");
+    mockUseSearchParams.mockImplementation(
+      () => currentParams as unknown as ReturnType<typeof useSearchParams>,
+    );
+    await renderPage();
+    // router.replace must not have overwritten boards=moon with the home board (kilter)
+    const boardReplaceCalls = mockReplace.mock.calls.filter(([url]: [string]) =>
+      url.includes("boards=kilter"),
+    );
+    expect(boardReplaceCalls).toHaveLength(0);
+    // The moonboard filter must still reach getClimbs
+    expect(mockGetClimbs).toHaveBeenCalledWith(
+      expect.objectContaining({ boardIds: ["moon"] }),
+    );
   });
 });
