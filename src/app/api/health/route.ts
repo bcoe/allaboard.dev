@@ -6,6 +6,7 @@
  */
 
 import { NextResponse } from "next/server";
+import db from "@/lib/server/db";
 
 /**
  * Check that the API server is reachable.
@@ -21,5 +22,10 @@ import { NextResponse } from "next/server";
  * ```
  */
 export async function GET() {
-  return NextResponse.json({ ok: true });
+  try {
+    await db.raw("SELECT 1");
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ ok: false }, { status: 503 });
+  }
 }
