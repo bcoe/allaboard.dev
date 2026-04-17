@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Navbar from "@/components/Navbar";
+import PageViewTracker from "@/components/PageViewTracker";
 import { AuthProvider } from "@/lib/auth-context";
 import "./globals.css";
 
@@ -29,6 +30,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-stone-950 text-stone-100 min-h-screen`}
       >
+        <PageViewTracker />
         <AuthProvider>
           <Navbar />
           <main className="max-w-5xl mx-auto px-4 py-8">{children}</main>
