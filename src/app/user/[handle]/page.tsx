@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
+import * as Sentry from "@sentry/nextjs";
 import { Board, Grade, User, UserTick } from "@/lib/types";
 import {
   getUserById,
@@ -1133,12 +1134,18 @@ function BoardDifficultySection() {
     setResult(null);
     setError(null);
 
+    const start = performance.now();
     try {
       const res = await recalculateBoardDifficulty();
       setResult(res);
     } catch {
       setError("Calculation failed. Check the server console for details.");
     } finally {
+      Sentry.metrics.distribution(
+        "board_difficulty.recalculate_duration_ms",
+        performance.now() - start,
+        { unit: "millisecond" },
+      );
       setRunning(false);
     }
   }
