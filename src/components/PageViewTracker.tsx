@@ -27,9 +27,13 @@ export default function PageViewTracker() {
   const pathname = usePathname();
 
   useEffect(() => {
-    Sentry.metrics.count("page.view", 1, {
-      attributes: { route: normalizePath(pathname) },
-    });
+    const route = normalizePath(pathname);
+    Sentry.metrics.count("page.view", 1, { attributes: { route } });
+    Sentry.metrics.gauge(
+      "queue.backlog",
+      Math.floor(Math.random() * 9) + 2,
+      { attributes: { route } },
+    );
   }, [pathname]);
 
   return null;
