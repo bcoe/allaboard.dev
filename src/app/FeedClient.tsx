@@ -8,6 +8,7 @@ import { timeAgo } from "@/lib/utils";
 import GradeBadge from "@/components/GradeBadge";
 import StarRating from "@/components/StarRating";
 import UserAvatar from "@/components/UserAvatar";
+import CommentSection from "@/components/CommentSection";
 import Link from "next/link";
 
 const PAGE_SIZE = 25;
@@ -50,7 +51,6 @@ export default function FeedClient() {
   }
 
   // Reset to "all" if the user logs out while on the "following" tab.
-  // Only act after auth has resolved — not during the initial loading state.
   useEffect(() => {
     if (!authLoading && !user && tab === "following") switchTab("all");
   }, [authLoading, user, tab]);
@@ -142,8 +142,17 @@ const INSTAGRAM_PATH =
 
 function ActivityCard({ activity }: { activity: FeedActivity }) {
   const { user, climb, sent, rating, attempts, comment, date, instagramUrl } = activity;
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  // Stays true once set — keeps CommentSection mounted so it never re-fetches on re-open.
+  const [commentsLoaded, setCommentsLoaded] = useState(false);
+
+  function handleToggleComments() {
+    if (!commentsOpen) setCommentsLoaded(true);
+    setCommentsOpen((o) => !o);
+  }
+
   return (
-    <div className="bg-stone-800 border border-stone-700 rounded-xl p-4">
+    <div id={`tick-${activity.id}`} className="bg-stone-800 border border-stone-700 rounded-xl p-4">
       <div className="flex items-start gap-3">
         <Link href={`/user/${user.handle}`}>
           <UserAvatar user={user} size="md" />
@@ -201,8 +210,38 @@ function ActivityCard({ activity }: { activity: FeedActivity }) {
               </a>
             </div>
           )}
+
+          {/* Comment toggle */}
+          <div className="mt-3">
+            <button
+              onClick={handleToggleComments}
+              className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-300 transition-colors"
+            >
+              <ReplyIcon />
+              {commentsOpen
+                ? "Hide comments"
+                : activity.commentsCount > 0
+                  ? `${activity.commentsCount} ${activity.commentsCount === 1 ? "comment" : "comments"}`
+                  : "Comments"}
+            </button>
+          </div>
+
+          {/* Mount on first open, then keep mounted — hidden prevents re-fetch on re-open */}
+          {commentsLoaded && (
+            <div className={commentsOpen ? "" : "hidden"}>
+              <CommentSection tickId={activity.id} />
+            </div>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+function ReplyIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
   );
 }

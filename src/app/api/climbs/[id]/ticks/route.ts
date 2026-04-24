@@ -37,7 +37,7 @@ export async function GET(
       .select(
         "ticks.id", "ticks.date", "ticks.sent", "ticks.rating",
         "ticks.comment", "ticks.suggested_grade", "ticks.instagram_url",
-        "ticks.attempts", "ticks.created_at",
+        "ticks.attempts", "ticks.comments_count", "ticks.created_at",
         "users.handle", "users.display_name", "users.avatar_color",
         "users.profile_picture_url",
       );
@@ -54,6 +54,7 @@ export async function GET(
       suggestedGrade:       r.suggested_grade ?? undefined,
       instagramUrl:         r.instagram_url ?? undefined,
       attempts:             r.attempts ?? undefined,
+      commentsCount:        r.comments_count,
       createdAt:            r.created_at,
     })));
   } catch (err) {

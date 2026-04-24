@@ -195,6 +195,7 @@ export function logClimb({
       sent,
       rating: 3,
       comment: notes,
+      commentsCount: 0,
     };
     const feed = read<FeedActivity[]>(K.feed) ?? [];
     write(K.feed, [activity, ...feed]);

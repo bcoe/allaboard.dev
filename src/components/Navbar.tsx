@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useRef, useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import UserAvatar from "./UserAvatar";
+import InboxDropdown from "./InboxDropdown";
 
 const NAV_ITEMS = [
   { label: "Feed",   href: "/" },
@@ -58,37 +59,43 @@ export default function Navbar() {
 
         {/* Right side: skeleton while loading, login link or avatar dropdown */}
         {loading ? (
-          <div className="w-7 h-7 rounded-full bg-stone-700 animate-pulse" />
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded bg-stone-700 animate-pulse" />
+            <div className="w-7 h-7 rounded-full bg-stone-700 animate-pulse" />
+          </div>
         ) : user ? (
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setDropdownOpen((o) => !o)}
-              aria-label="Account menu"
-              className="rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-stone-900"
-            >
-              <UserAvatar user={user} size="xl" />
-            </button>
+          <div className="flex items-center gap-2">
+            <InboxDropdown />
+            <div className="relative" ref={dropdownRef}>
+              <button
+                onClick={() => setDropdownOpen((o) => !o)}
+                aria-label="Account menu"
+                className="rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-stone-900"
+              >
+                <UserAvatar user={user} size="xl" />
+              </button>
 
-            {dropdownOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-stone-800 border border-stone-700 rounded-xl shadow-xl py-1 z-50">
-                <div className="px-4 py-2.5 border-b border-stone-700">
-                  <div className="text-white text-sm font-semibold truncate">@{user.handle}</div>
+              {dropdownOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-stone-800 border border-stone-700 rounded-xl shadow-xl py-1 z-50">
+                  <div className="px-4 py-2.5 border-b border-stone-700">
+                    <div className="text-white text-sm font-semibold truncate">@{user.handle}</div>
+                  </div>
+                  <Link
+                    href={`/user/${user.handle}`}
+                    onClick={() => setDropdownOpen(false)}
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-stone-300 hover:text-white hover:bg-stone-700 transition-colors"
+                  >
+                    View Profile
+                  </Link>
+                  <button
+                    onClick={() => { logout(); setDropdownOpen(false); }}
+                    className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-stone-300 hover:text-white hover:bg-stone-700 transition-colors"
+                  >
+                    Log out
+                  </button>
                 </div>
-                <Link
-                  href={`/user/${user.handle}`}
-                  onClick={() => setDropdownOpen(false)}
-                  className="flex items-center gap-2 px-4 py-2 text-sm text-stone-300 hover:text-white hover:bg-stone-700 transition-colors"
-                >
-                  View Profile
-                </Link>
-                <button
-                  onClick={() => { logout(); setDropdownOpen(false); }}
-                  className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-stone-300 hover:text-white hover:bg-stone-700 transition-colors"
-                >
-                  Log out
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         ) : (
           <a

@@ -1,11 +1,16 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import Navbar from "@/components/Navbar";
 import { useAuth } from "@/lib/auth-context";
 import type { User } from "@/lib/types";
 
 jest.mock("@/lib/auth-context");
+jest.mock("@/lib/db", () => ({
+  getInbox: jest.fn().mockResolvedValue({ items: [], unreadCount: 0 }),
+  markInboxItemRead: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock("next/navigation", () => ({
   usePathname: jest.fn().mockReturnValue("/"),
+  useRouter:   jest.fn().mockReturnValue({ push: jest.fn(), replace: jest.fn() }),
 }));
 jest.mock("next/image", () => ({
   __esModule: true,
@@ -32,53 +37,53 @@ const mockUser: User = {
 };
 
 describe("Navbar — authentication states", () => {
-  it("shows no Login link while auth state is loading", () => {
+  it("shows no Login link while auth state is loading", async () => {
     mockUseAuth.mockReturnValue({ user: null, loading: true, logout: jest.fn(), updateUser: jest.fn() });
-    render(<Navbar />);
+    await act(async () => { render(<Navbar />); });
     expect(screen.queryByText("Login")).not.toBeInTheDocument();
   });
 
-  it("shows a Login link when the user is logged out", () => {
+  it("shows a Login link when the user is logged out", async () => {
     mockUseAuth.mockReturnValue({ user: null, loading: false, logout: jest.fn(), updateUser: jest.fn() });
-    render(<Navbar />);
+    await act(async () => { render(<Navbar />); });
     expect(screen.getByText("Login")).toBeInTheDocument();
   });
 
-  it("renders all primary nav items regardless of auth state", () => {
+  it("renders all primary nav items regardless of auth state", async () => {
     mockUseAuth.mockReturnValue({ user: null, loading: false, logout: jest.fn(), updateUser: jest.fn() });
-    render(<Navbar />);
+    await act(async () => { render(<Navbar />); });
     expect(screen.getByText("Feed")).toBeInTheDocument();
     expect(screen.getByText("Climbs")).toBeInTheDocument();
     expect(screen.getByText("Boards")).toBeInTheDocument();
   });
 
-  it("shows an account menu button and no Login link when logged in", () => {
+  it("shows an account menu button and no Login link when logged in", async () => {
     mockUseAuth.mockReturnValue({ user: mockUser, loading: false, logout: jest.fn(), updateUser: jest.fn() });
-    render(<Navbar />);
+    await act(async () => { render(<Navbar />); });
     expect(screen.getByLabelText("Account menu")).toBeInTheDocument();
     expect(screen.queryByText("Login")).not.toBeInTheDocument();
   });
 
-  it("opens a dropdown with handle, profile link and logout when avatar is clicked", () => {
+  it("opens a dropdown with handle, profile link and logout when avatar is clicked", async () => {
     mockUseAuth.mockReturnValue({ user: mockUser, loading: false, logout: jest.fn(), updateUser: jest.fn() });
-    render(<Navbar />);
+    await act(async () => { render(<Navbar />); });
     fireEvent.click(screen.getByLabelText("Account menu"));
     expect(screen.getByText("@testuser")).toBeInTheDocument();
     expect(screen.getByText("View Profile")).toBeInTheDocument();
     expect(screen.getByText("Log out")).toBeInTheDocument();
   });
 
-  it("'View Profile' links to the user's profile page", () => {
+  it("'View Profile' links to the user's profile page", async () => {
     mockUseAuth.mockReturnValue({ user: mockUser, loading: false, logout: jest.fn(), updateUser: jest.fn() });
-    render(<Navbar />);
+    await act(async () => { render(<Navbar />); });
     fireEvent.click(screen.getByLabelText("Account menu"));
     expect(screen.getByText("View Profile").closest("a")).toHaveAttribute("href", "/user/testuser");
   });
 
-  it("calls the logout handler when 'Log out' is clicked", () => {
+  it("calls the logout handler when 'Log out' is clicked", async () => {
     const logout = jest.fn();
     mockUseAuth.mockReturnValue({ user: mockUser, loading: false, logout, updateUser: jest.fn() });
-    render(<Navbar />);
+    await act(async () => { render(<Navbar />); });
     fireEvent.click(screen.getByLabelText("Account menu"));
     fireEvent.click(screen.getByText("Log out"));
     expect(logout).toHaveBeenCalledTimes(1);

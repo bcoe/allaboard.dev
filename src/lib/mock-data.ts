@@ -288,6 +288,7 @@ export const mockFeedActivities: FeedActivity[] = [
     sent: true,
     rating: 4,
     comment: "Finally sent Undercling Universe after months of work. I'm shaking.",
+    commentsCount: 0,
   },
   {
     id: "fa2",
@@ -297,6 +298,7 @@ export const mockFeedActivities: FeedActivity[] = [
     sent: true,
     rating: 3,
     comment: "Moonpig flash attempt went sideways but got it 3rd go.",
+    commentsCount: 0,
   },
   {
     id: "fa3",
@@ -306,6 +308,7 @@ export const mockFeedActivities: FeedActivity[] = [
     sent: false,
     rating: 2,
     comment: "Wrist was tweaky, had to bail early. Back on it next session.",
+    commentsCount: 0,
   },
   {
     id: "fa4",
@@ -314,6 +317,7 @@ export const mockFeedActivities: FeedActivity[] = [
     date: new Date(Date.now() - 26 * 3600000).toISOString(),
     sent: true,
     rating: 4,
+    commentsCount: 0,
   },
   {
     id: "fa5",
@@ -323,5 +327,6 @@ export const mockFeedActivities: FeedActivity[] = [
     sent: false,
     rating: 2,
     comment: "Gaston Alley is kicking my ass. Shoulder endurance needs work.",
+    commentsCount: 0,
   },
 ];

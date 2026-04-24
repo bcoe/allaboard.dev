@@ -6,11 +6,11 @@
  * the owner check is removed or the edit control is shown to everyone.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import ClimbPage from "@/app/climbs/[id]/page";
 import { useAuth } from "@/lib/auth-context";
 import { getClimbById, getClimbTicks } from "@/lib/db";
-import type { User, Climb } from "@/lib/types";
+import type { User, Climb, ClimbTick } from "@/lib/types";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -19,7 +19,13 @@ jest.mock("@/lib/db");
 jest.mock("next/navigation", () => ({
   useParams: jest.fn().mockReturnValue({ id: "climb-1" }),
 }));
-jest.mock("@/components/TickModal",      () => ({ __esModule: true, default: () => null }));
+jest.mock("@/components/TickModal",       () => ({ __esModule: true, default: () => null }));
+jest.mock("@/components/CommentSection", () => ({
+  __esModule: true,
+  default: ({ tickId }: { tickId: string }) => (
+    <div data-testid={`comment-section-${tickId}`} />
+  ),
+}));
 jest.mock("@/components/ClimbEditModal", () => ({
   __esModule: true,
   default: ({ climb, onClose }: { climb: Climb; onClose: () => void }) => (
@@ -145,5 +151,83 @@ describe("ClimbPage — edit modal", () => {
     expect(screen.getByTestId("climb-edit-modal")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Close"));
     expect(screen.queryByTestId("climb-edit-modal")).not.toBeInTheDocument();
+  });
+});
+
+// ── Lazy-loading tests ────────────────────────────────────────────────────────
+
+const mockTick: ClimbTick = {
+  id: "tick-1",
+  userHandle: "alice",
+  userDisplayName: "Alice",
+  userAvatarColor: "bg-orange-500",
+  sent: true,
+  rating: 3,
+  attempts: 5,
+  commentsCount: 0,
+  date: "2026-04-01",
+  createdAt: "2026-04-01T00:00:00.000Z",
+};
+
+// scrollIntoView is not implemented in jsdom
+window.HTMLElement.prototype.scrollIntoView = jest.fn();
+
+describe("ClimbPage — comment lazy-loading", () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({ user: null, loading: false, logout: jest.fn(), updateUser: jest.fn() });
+    mockGetClimbTicks.mockResolvedValue([mockTick]);
+  });
+
+  it("does not mount CommentSection before the comments button is clicked", async () => {
+    render(<ClimbPage />);
+    await screen.findByText("@alice");
+    expect(screen.queryByTestId("comment-section-tick-1")).not.toBeInTheDocument();
+  });
+
+  it("mounts CommentSection after the comments button is clicked", async () => {
+    render(<ClimbPage />);
+    await screen.findByText("@alice");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /comments/i }));
+    });
+    expect(screen.getByTestId("comment-section-tick-1")).toBeInTheDocument();
+  });
+
+  it("keeps CommentSection in the DOM after closing (hidden class)", async () => {
+    render(<ClimbPage />);
+    await screen.findByText("@alice");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /comments/i }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /hide comments/i }));
+    });
+    const section = screen.getByTestId("comment-section-tick-1");
+    expect(section).toBeInTheDocument();
+    expect(section.parentElement?.className).toBe("hidden");
+  });
+
+  it("auto-opens comments when ?openComments=tick-1 is in the URL", async () => {
+    window.history.pushState({}, "", "?openComments=tick-1");
+    render(<ClimbPage />);
+    await screen.findByText("@alice");
+    // Wait for the ticks-loaded effect to run and open comments
+    await screen.findByTestId("comment-section-tick-1");
+    expect(screen.getByTestId("comment-section-tick-1")).toBeInTheDocument();
+    window.history.pushState({}, "", "/");
+  });
+
+  it("shows plural 'N comments' label when commentsCount > 1", async () => {
+    mockGetClimbTicks.mockResolvedValue([{ ...mockTick, commentsCount: 4 }]);
+    render(<ClimbPage />);
+    await screen.findByText("@alice");
+    expect(screen.getByRole("button", { name: /4 comments/i })).toBeInTheDocument();
+  });
+
+  it("shows singular '1 comment' label when commentsCount is 1", async () => {
+    mockGetClimbTicks.mockResolvedValue([{ ...mockTick, commentsCount: 1 }]);
+    render(<ClimbPage />);
+    await screen.findByText("@alice");
+    expect(screen.getByRole("button", { name: /^1 comment$/i })).toBeInTheDocument();
   });
 });

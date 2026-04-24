@@ -441,6 +441,117 @@ paths:
       security:
         - apiKeyAuth: []
         - cookieAuth: []
+  /api/comments/{id}:
+    patch:
+      summary: Update a comment's body.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The updated comment.
+        "400":
+          description: body is empty.
+        "401":
+          description: not authenticated.
+        "403":
+          description: not the comment owner.
+        "404":
+          description: comment does not exist.
+        "500":
+          description: database error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - body
+              properties:
+                body:
+                  type: string
+                  description: new comment text.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
+    delete:
+      summary: Delete a comment.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content on success.
+        "401":
+          description: not authenticated.
+        "403":
+          description: not the comment owner.
+        "404":
+          description: comment does not exist.
+        "500":
+          description: database error.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
+  /api/comments:
+    get:
+      summary: List all comments for a tick, ordered oldest-first, with replies nested.
+      parameters:
+        - name: tickId
+          in: query
+          required: true
+          description: UUID of the tick to fetch comments for.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of top-level Comment objects, each with a replies array.
+        "400":
+          description: tickId is missing.
+        "500":
+          description: database error.
+    post:
+      summary: Post a comment on a tick.
+      responses:
+        "201":
+          description: The created Comment object with status 201.
+        "400":
+          description: tickId or body are missing.
+        "401":
+          description: not authenticated.
+        "404":
+          description: the tick does not exist.
+        "500":
+          description: database error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - tickId
+                - body
+              properties:
+                tickId:
+                  type: string
+                  description: UUID of the tick being commented on.
+                body:
+                  type: string
+                  description: comment text.
+                parentCommentId:
+                  type: string
+                  description: UUID of the parent comment when replying.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
   /api/feed:
     get:
       summary: Fetch the global activity feed (most recent 50 ticks, newest first).
@@ -455,6 +566,42 @@ paths:
       responses:
         "200":
           description: "{ ok: true } — always returns 200 when the server is up."
+  /api/inbox/{id}:
+    patch:
+      summary: Mark an inbox item as read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "{ read: true } on success."
+        "401":
+          description: not authenticated.
+        "403":
+          description: not the inbox owner.
+        "404":
+          description: item does not exist.
+        "500":
+          description: database error.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
+  /api/inbox:
+    get:
+      summary: List the last 25 inbox items for the current user, newest first.
+      responses:
+        "200":
+          description: "{ items: InboxItem[], unreadCount: number }"
+        "401":
+          description: not authenticated.
+        "500":
+          description: database error.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
   /api/leaderboard:
     get:
       summary: Return all users sorted by points descending, with their total tick count, hardest sent grade, and up to five ticks at that grade for the hover tooltip.

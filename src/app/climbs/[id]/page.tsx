@@ -12,6 +12,7 @@ import StarRating from "@/components/StarRating";
 import TickModal from "@/components/TickModal";
 import ClimbEditModal from "@/components/ClimbEditModal";
 import UserAvatar from "@/components/UserAvatar";
+import CommentSection from "@/components/CommentSection";
 
 export default function ClimbPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,8 +22,17 @@ export default function ClimbPage() {
   const [notFound, setNotFound]   = useState(false);
   const [tickModal, setTickModal]   = useState(false);
   const [editModal, setEditModal]   = useState(false);
+  // tickId → comments open state; populated from URL param on load
+  const [openCommentsByTick, setOpenCommentsByTick] = useState<Record<string, boolean>>({});
+  // Stays true once set — keeps CommentSection mounted so it never re-fetches on re-open.
+  const [loadedCommentsByTick, setLoadedCommentsByTick] = useState<Record<string, boolean>>({});
 
   const isOwner = !!(user && climb && user.id === climb.author);
+
+  // Read URL params client-side to avoid useSearchParams Suspense requirement
+  const openCommentsParam = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("openComments")
+    : null;
 
   async function loadClimb() {
     const c = await getClimbById(id);
@@ -31,7 +41,8 @@ export default function ClimbPage() {
   }
 
   async function loadTicks() {
-    setTicks(await getClimbTicks(id));
+    const t = await getClimbTicks(id);
+    setTicks(t);
   }
 
   useEffect(() => {
@@ -39,6 +50,30 @@ export default function ClimbPage() {
     void loadTicks();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // After ticks load, open comments section if URL requests it, then scroll to hash
+  useEffect(() => {
+    if (ticks.length === 0) return;
+
+    if (openCommentsParam) {
+      setOpenCommentsByTick((prev) => ({ ...prev, [openCommentsParam]: true }));
+      setLoadedCommentsByTick((prev) => ({ ...prev, [openCommentsParam]: true }));
+    }
+
+    // Give the DOM a beat to render the opened section, then scroll to hash
+    const hash = window.location.hash.replace("#", "");
+    if (hash) {
+      setTimeout(() => {
+        document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 300);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticks.length, openCommentsParam]);
+
+  function toggleComments(tickId: string) {
+    setLoadedCommentsByTick((prev) => ({ ...prev, [tickId]: true }));
+    setOpenCommentsByTick((prev) => ({ ...prev, [tickId]: !prev[tickId] }));
+  }
 
   if (notFound) {
     return (
@@ -52,6 +87,11 @@ export default function ClimbPage() {
   if (!climb) {
     return <div className="text-stone-500 text-center py-16">Loading…</div>;
   }
+
+  // Extract highlighted comment id from hash if present
+  const hashCommentId = typeof window !== "undefined"
+    ? window.location.hash.replace("#comment-", "") || undefined
+    : undefined;
 
   return (
     <>
@@ -179,7 +219,14 @@ export default function ClimbPage() {
             ) : (
               <div className="flex flex-col gap-4">
                 {ticks.map((tick) => (
-                  <ClimbTickCard key={tick.id} tick={tick} />
+                  <ClimbTickCard
+                    key={tick.id}
+                    tick={tick}
+                    commentsOpen={!!openCommentsByTick[tick.id]}
+                    commentsLoaded={!!loadedCommentsByTick[tick.id]}
+                    onToggleComments={() => toggleComments(tick.id)}
+                    highlightCommentId={hashCommentId}
+                  />
                 ))}
               </div>
             )}
@@ -193,7 +240,19 @@ export default function ClimbPage() {
 const INSTAGRAM_ICON_PATH =
   "M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z";
 
-function ClimbTickCard({ tick }: { tick: ClimbTick }) {
+function ClimbTickCard({
+  tick,
+  commentsOpen,
+  commentsLoaded,
+  onToggleComments,
+  highlightCommentId,
+}: {
+  tick: ClimbTick;
+  commentsOpen: boolean;
+  commentsLoaded: boolean;
+  onToggleComments: () => void;
+  highlightCommentId?: string;
+}) {
   const avatarUser = {
     id: tick.userHandle,
     handle: tick.userHandle,
@@ -210,7 +269,7 @@ function ClimbTickCard({ tick }: { tick: ClimbTick }) {
   };
 
   return (
-    <div className="bg-stone-800 border border-stone-700 rounded-xl p-4">
+    <div id={`tick-${tick.id}`} className="bg-stone-800 border border-stone-700 rounded-xl p-4">
       <div className="flex items-start gap-3">
         <UserAvatar user={avatarUser} size="md" />
         <div className="flex-1 min-w-0">
@@ -268,8 +327,38 @@ function ClimbTickCard({ tick }: { tick: ClimbTick }) {
               Watch video
             </a>
           )}
+
+          {/* Comment toggle */}
+          <div className="mt-3">
+            <button
+              onClick={onToggleComments}
+              className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-300 transition-colors"
+            >
+              <ReplyIcon />
+              {commentsOpen
+                ? "Hide comments"
+                : tick.commentsCount > 0
+                  ? `${tick.commentsCount} ${tick.commentsCount === 1 ? "comment" : "comments"}`
+                  : "Comments"}
+            </button>
+          </div>
+
+          {/* Mount on first open, then keep mounted — hidden prevents re-fetch on re-open */}
+          {commentsLoaded && (
+            <div className={commentsOpen ? "" : "hidden"}>
+              <CommentSection tickId={tick.id} highlightCommentId={highlightCommentId} />
+            </div>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+function ReplyIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
   );
 }

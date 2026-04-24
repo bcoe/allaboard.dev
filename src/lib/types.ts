@@ -45,6 +45,7 @@ export interface ClimbTick {
   instagramUrl?: string;
   sent: boolean;
   attempts?: number;
+  commentsCount: number;
   date: string;
   createdAt: string;
 }
@@ -149,4 +150,47 @@ export interface FeedActivity {
   comment?: string;
   suggestedGrade?: Grade;
   instagramUrl?: string;
+  commentsCount: number;
+}
+
+export interface Comment {
+  id: string;
+  tickId: string;
+  userId: string;
+  userHandle: string;
+  userDisplayName: string;
+  userAvatarColor: string;
+  userProfilePictureUrl?: string;
+  parentCommentId?: string;
+  body: string;
+  createdAt: string;
+  replies: Comment[];
+}
+
+export interface InboxItem {
+  id: string;
+  type: "tick" | "comment";
+  read: boolean;
+  createdAt: string;
+  actor: {
+    handle: string;
+    displayName: string;
+    avatarColor: string;
+    profilePictureUrl?: string;
+  };
+  tick?: {
+    id: string;
+    climbId: string;
+    climbName: string;
+    grade: Grade;
+    boardName?: string;
+    angle?: number;
+    sent: boolean;
+    attempts?: number;
+  };
+  comment?: {
+    id: string;
+    body: string;
+    tickId: string;
+  };
 }

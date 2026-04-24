@@ -1,11 +1,17 @@
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import FeedClient from "@/app/FeedClient";
 import { useAuth } from "@/lib/auth-context";
-import { getFeedActivities } from "@/lib/db";
+import { getFeedActivities, getTickComments } from "@/lib/db";
 import type { FeedActivity, User } from "@/lib/types";
 
 jest.mock("@/lib/auth-context");
 jest.mock("@/lib/db");
+jest.mock("@/components/CommentSection", () => ({
+  __esModule: true,
+  default: ({ tickId }: { tickId: string }) => (
+    <div data-testid={`comment-section-${tickId}`} />
+  ),
+}));
 
 // IntersectionObserver is not implemented in jsdom.
 global.IntersectionObserver = class {
@@ -16,6 +22,7 @@ global.IntersectionObserver = class {
 
 const mockUseAuth = jest.mocked(useAuth);
 const mockGetFeedActivities = jest.mocked(getFeedActivities);
+const mockGetTickComments = jest.mocked(getTickComments);
 
 const feedUser: User = {
   id: "climber1",
@@ -52,6 +59,7 @@ const mockActivity: FeedActivity = {
   rating: 3,
   attempts: 5,
   comment: "Great problem!",
+  commentsCount: 0,
   user: feedUser,
   climb: {
     id: "climb-1",
@@ -129,5 +137,64 @@ describe("FeedClient — activity cards", () => {
     mockGetFeedActivities.mockResolvedValue({ activities: [], hasMore: false });
     render(<FeedClient />);
     expect(await screen.findByText("No activity yet.")).toBeInTheDocument();
+  });
+});
+
+describe("FeedClient — comment lazy-loading", () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({ user: null, loading: false, logout: jest.fn(), updateUser: jest.fn() });
+    mockGetTickComments.mockResolvedValue([]);
+  });
+
+  it("does not mount CommentSection before the comments button is clicked", async () => {
+    mockGetFeedActivities.mockResolvedValue({ activities: [mockActivity], hasMore: false });
+    render(<FeedClient />);
+    await screen.findByText("Test Problem");
+    expect(screen.queryByTestId("comment-section-tick-1")).not.toBeInTheDocument();
+  });
+
+  it("mounts CommentSection after the comments button is clicked", async () => {
+    mockGetFeedActivities.mockResolvedValue({ activities: [mockActivity], hasMore: false });
+    render(<FeedClient />);
+    await screen.findByText("Test Problem");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /comments/i }));
+    });
+    expect(screen.getByTestId("comment-section-tick-1")).toBeInTheDocument();
+  });
+
+  it("keeps CommentSection in the DOM after closing (hidden class)", async () => {
+    mockGetFeedActivities.mockResolvedValue({ activities: [mockActivity], hasMore: false });
+    render(<FeedClient />);
+    await screen.findByText("Test Problem");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /comments/i }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /hide comments/i }));
+    });
+    const section = screen.getByTestId("comment-section-tick-1");
+    expect(section).toBeInTheDocument();
+    expect(section.parentElement?.className).toBe("hidden");
+  });
+
+  it("shows plural 'N comments' label when commentsCount > 1", async () => {
+    mockGetFeedActivities.mockResolvedValue({
+      activities: [{ ...mockActivity, commentsCount: 3 }],
+      hasMore: false,
+    });
+    render(<FeedClient />);
+    await screen.findByText("Test Problem");
+    expect(screen.getByRole("button", { name: /3 comments/i })).toBeInTheDocument();
+  });
+
+  it("shows singular '1 comment' label when commentsCount is 1", async () => {
+    mockGetFeedActivities.mockResolvedValue({
+      activities: [{ ...mockActivity, commentsCount: 1 }],
+      hasMore: false,
+    });
+    render(<FeedClient />);
+    await screen.findByText("Test Problem");
+    expect(screen.getByRole("button", { name: /^1 comment$/i })).toBeInTheDocument();
   });
 });

@@ -3,7 +3,7 @@
  * Credentials are included on every request so the auth session cookie is sent.
  */
 
-import { Board, Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity } from "@/lib/types";
+import { Board, Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity, Comment, InboxItem } from "@/lib/types";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -262,6 +262,38 @@ export async function importMoonboardData(
     method: "POST",
     body: JSON.stringify(data),
   });
+}
+
+// ─── Comments ─────────────────────────────────────────────────────────────────
+
+export async function getTickComments(tickId: string): Promise<Comment[]> {
+  return api<Comment[]>(`/comments?tickId=${encodeURIComponent(tickId)}`);
+}
+
+export async function postComment(data: {
+  tickId: string;
+  body: string;
+  parentCommentId?: string;
+}): Promise<Comment> {
+  return api<Comment>("/comments", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function updateComment(id: string, body: string): Promise<Comment> {
+  return api<Comment>(`/comments/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ body }) });
+}
+
+export async function deleteComment(id: string): Promise<void> {
+  await api<void>(`/comments/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// ─── Inbox ────────────────────────────────────────────────────────────────────
+
+export async function getInbox(): Promise<{ items: InboxItem[]; unreadCount: number }> {
+  return api<{ items: InboxItem[]; unreadCount: number }>("/inbox");
+}
+
+export async function markInboxItemRead(id: string): Promise<void> {
+  await api<void>(`/inbox/${encodeURIComponent(id)}`, { method: "PATCH" });
 }
 
 // ─── Leaderboard ──────────────────────────────────────────────────────────────
