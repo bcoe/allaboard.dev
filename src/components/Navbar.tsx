@@ -45,7 +45,7 @@ export default function Navbar() {
               <Link
                 key={href}
                 href={href}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                className={`px-2 sm:px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                   active
                     ? "bg-stone-800 text-white"
                     : "text-stone-400 hover:text-white hover:bg-stone-800"
@@ -59,12 +59,12 @@ export default function Navbar() {
 
         {/* Right side: skeleton while loading, login link or avatar dropdown */}
         {loading ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <div className="w-7 h-7 rounded bg-stone-700 animate-pulse" />
             <div className="w-7 h-7 rounded-full bg-stone-700 animate-pulse" />
           </div>
         ) : user ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <InboxDropdown />
             <div className="relative" ref={dropdownRef}>
               <button
