@@ -177,7 +177,7 @@ describe("GET /api/inbox — limit", () => {
       .mockReturnValueOnce(qb({ count: "0" }, { count: "0" }));
 
     await GET(new NextRequest("http://localhost/api/inbox"));
-    expect(inboxQb.limit).toHaveBeenCalledWith(6);
+    expect(inboxQb.limit).toHaveBeenCalledWith(10);
   });
 });
 

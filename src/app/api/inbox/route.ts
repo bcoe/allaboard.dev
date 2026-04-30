@@ -10,7 +10,7 @@ import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
 /**
- * List the last 25 inbox items for the current user, newest first.
+ * List the last 10 inbox items for the current user, newest first.
  *
  * Two item types:
  * - `tick` — a followed user ticked a climb.
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
       .leftJoin("comments as cm", "cm.id", "ii.comment_id")
       .where("ii.user_id", userId)
       .orderBy("ii.created_at", "desc")
-      .limit(6)
+      .limit(10)
       .select(
         "ii.id",
         "ii.type",
@@ -58,11 +58,6 @@ export async function GET(req: NextRequest) {
         "cm.body as comment_body",
         "cm.tick_id as comment_tick_id",
       );
-
-    const unreadCount = await db("inbox_items")
-      .where({ user_id: userId, read: false })
-      .count("id as count")
-      .first();
 
     const items = rows.map((r) => ({
       id: r.id,
@@ -96,10 +91,14 @@ export async function GET(req: NextRequest) {
       }),
     }));
 
-    return NextResponse.json({
-      items,
-      unreadCount: Number((unreadCount as { count: string | number } | undefined)?.count ?? 0),
-    });
+    const unreadRow = await db("inbox_items")
+      .where("user_id", userId)
+      .where("read", false)
+      .count("id as count")
+      .first();
+    const unreadCount = Number((unreadRow as { count: string | number } | undefined)?.count ?? 0);
+
+    return NextResponse.json({ items, unreadCount });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Failed to fetch inbox" }, { status: 500 });
