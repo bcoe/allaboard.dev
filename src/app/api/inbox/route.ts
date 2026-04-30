@@ -91,12 +91,7 @@ export async function GET(req: NextRequest) {
       }),
     }));
 
-    const unreadRow = await db("inbox_items")
-      .where("user_id", userId)
-      .where("read", false)
-      .count("id as count")
-      .first();
-    const unreadCount = Number((unreadRow as { count: string | number } | undefined)?.count ?? 0);
+    const unreadCount = items.filter((i) => !i.read).length;
 
     return NextResponse.json({ items, unreadCount });
   } catch (err) {

@@ -591,7 +591,7 @@ paths:
         - cookieAuth: []
   /api/inbox:
     get:
-      summary: List the last 25 inbox items for the current user, newest first.
+      summary: List the last 10 inbox items for the current user, newest first.
       responses:
         "200":
           description: "{ items: InboxItem[], unreadCount: number }"

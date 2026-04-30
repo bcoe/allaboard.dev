@@ -106,9 +106,7 @@ describe("GET /api/inbox — access control", () => {
 describe("GET /api/inbox — tick-type items", () => {
   it("returns items with enriched actor and tick fields", async () => {
     mockGetIronSession.mockResolvedValue(authSession("alice") as never);
-    mockDb
-      .mockReturnValueOnce(qb([tickInboxRow]))
-      .mockReturnValueOnce(qb({ count: "0" }, { count: "0" }));
+    mockDb.mockReturnValueOnce(qb([tickInboxRow]));
 
     const { items } = await (await GET(new NextRequest("http://localhost/api/inbox"))).json();
     expect(items).toHaveLength(1);
@@ -132,9 +130,7 @@ describe("GET /api/inbox — tick-type items", () => {
 describe("GET /api/inbox — comment-type items", () => {
   it("returns items with enriched actor, tick, and comment fields", async () => {
     mockGetIronSession.mockResolvedValue(authSession("alice") as never);
-    mockDb
-      .mockReturnValueOnce(qb([commentInboxRow]))
-      .mockReturnValueOnce(qb({ count: "0" }, { count: "0" }));
+    mockDb.mockReturnValueOnce(qb([commentInboxRow]));
 
     const { items } = await (await GET(new NextRequest("http://localhost/api/inbox"))).json();
     expect(items).toHaveLength(1);
@@ -149,9 +145,7 @@ describe("GET /api/inbox — comment-type items", () => {
 describe("GET /api/inbox — unread count", () => {
   it("includes the total unread count as a separate field", async () => {
     mockGetIronSession.mockResolvedValue(authSession("alice") as never);
-    mockDb
-      .mockReturnValueOnce(qb([tickInboxRow, commentInboxRow]))
-      .mockReturnValueOnce(qb({ count: "2" }, { count: "2" }));
+    mockDb.mockReturnValueOnce(qb([tickInboxRow, commentInboxRow]));
 
     const body = await (await GET(new NextRequest("http://localhost/api/inbox"))).json();
     expect(body.unreadCount).toBe(2);
@@ -159,12 +153,33 @@ describe("GET /api/inbox — unread count", () => {
 
   it("reports zero when all items are read", async () => {
     mockGetIronSession.mockResolvedValue(authSession("alice") as never);
-    mockDb
-      .mockReturnValueOnce(qb([readInboxRow]))
-      .mockReturnValueOnce(qb({ count: "0" }, { count: "0" }));
+    mockDb.mockReturnValueOnce(qb([readInboxRow]));
 
     const body = await (await GET(new NextRequest("http://localhost/api/inbox"))).json();
     expect(body.unreadCount).toBe(0);
+  });
+
+  it("counts only unread items among the fetched rows (mixed read/unread)", async () => {
+    mockGetIronSession.mockResolvedValue(authSession("alice") as never);
+    mockDb.mockReturnValueOnce(qb([tickInboxRow, readInboxRow, commentInboxRow]));
+
+    const body = await (await GET(new NextRequest("http://localhost/api/inbox"))).json();
+    // tickInboxRow and commentInboxRow are unread; readInboxRow is read
+    expect(body.unreadCount).toBe(2);
+  });
+
+  it("is bounded by the number of fetched rows, never exceeds 10", async () => {
+    mockGetIronSession.mockResolvedValue(authSession("alice") as never);
+    const tenUnreadRows = Array.from({ length: 10 }, (_, i) => ({
+      ...tickInboxRow,
+      id: `inbox-${i}`,
+      read: false,
+    }));
+    mockDb.mockReturnValueOnce(qb(tenUnreadRows));
+
+    const body = await (await GET(new NextRequest("http://localhost/api/inbox"))).json();
+    expect(body.unreadCount).toBe(10);
+    expect(body.items).toHaveLength(10);
   });
 });
 
@@ -172,9 +187,7 @@ describe("GET /api/inbox — limit", () => {
   it("passes limit(6) to the query builder", async () => {
     mockGetIronSession.mockResolvedValue(authSession("alice") as never);
     const inboxQb = qb([]);
-    mockDb
-      .mockReturnValueOnce(inboxQb)
-      .mockReturnValueOnce(qb({ count: "0" }, { count: "0" }));
+    mockDb.mockReturnValueOnce(inboxQb);
 
     await GET(new NextRequest("http://localhost/api/inbox"));
     expect(inboxQb.limit).toHaveBeenCalledWith(10);
