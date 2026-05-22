@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 
@@ -30,6 +31,8 @@ export async function GET() {
 
   const user = await db("users").where({ id: session.userId }).first();
   if (!user) return NextResponse.json(null, { status: 401 });
+
+  Sentry.setUser({ id: user.id, username: user.handle });
 
   return NextResponse.json({
     id:                 user.id,

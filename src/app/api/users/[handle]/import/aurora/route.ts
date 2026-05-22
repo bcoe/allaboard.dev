@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 import { fontToVGrade } from "@/lib/fontToVGrade";
@@ -73,6 +74,7 @@ export async function POST(
 
   const { handle } = await params;
   if (userId !== handle) {
+    Sentry.logger.warn("aurora_import_forbidden", { targetHandle: handle });
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -177,5 +179,17 @@ export async function POST(
   }
 
   const skipped = Object.values(skipDetails).reduce((a, b) => a + b, 0);
+
+  Sentry.logger.info("aurora_import_completed", {
+    ascentCount: body.ascents.length,
+    imported,
+    climbsCreated,
+    skipped,
+    skippedMissingName: skipDetails.missingName,
+    skippedUnknownGrade: skipDetails.unknownGrade,
+    skippedInvalidAngle: skipDetails.invalidAngle,
+    skippedAlreadyImported: skipDetails.alreadyImported,
+  });
+
   return NextResponse.json({ imported, climbsCreated, skipped, skipDetails }, { status: 200 });
 }

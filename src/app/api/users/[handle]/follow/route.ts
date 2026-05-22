@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -46,6 +47,8 @@ export async function POST(
       .onConflict(["follower_id", "following_id"])
       .ignore();
 
+    Sentry.logger.info("user_followed", { targetHandle: handle });
+
     return NextResponse.json({ following: true });
   } catch (err) {
     console.error(err);
@@ -84,6 +87,8 @@ export async function DELETE(
     await db("follows")
       .where({ follower_id: userId, following_id: target.id })
       .delete();
+
+    Sentry.logger.info("user_unfollowed", { targetHandle: handle });
 
     return NextResponse.json({ following: false });
   } catch (err) {

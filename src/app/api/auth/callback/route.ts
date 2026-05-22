@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 
@@ -11,6 +12,12 @@ export async function GET(req: NextRequest) {
   const storedState = req.cookies.get("oauth_state")?.value;
 
   if (!code || !state || state !== storedState) {
+    Sentry.logger.warn("oauth_callback_state_mismatch", {
+      provider: "google",
+      hasCode: !!code,
+      hasState: !!state,
+      hasStoredState: !!storedState,
+    });
     return NextResponse.redirect(`${origin}/?auth_error=invalid_state`);
   }
 
@@ -28,7 +35,11 @@ export async function GET(req: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    console.error("Token exchange failed:", await tokenRes.text());
+    Sentry.logger.error("oauth_token_exchange_failed", {
+      provider: "google",
+      status: tokenRes.status,
+      responseBody: await tokenRes.text(),
+    });
     return NextResponse.redirect(`${origin}/?auth_error=token_exchange`);
   }
 
@@ -44,6 +55,10 @@ export async function GET(req: NextRequest) {
   });
 
   if (!profileRes.ok) {
+    Sentry.logger.error("oauth_profile_fetch_failed", {
+      provider: "google",
+      status: profileRes.status,
+    });
     return NextResponse.redirect(`${origin}/?auth_error=profile_fetch`);
   }
 
@@ -97,6 +112,19 @@ export async function GET(req: NextRequest) {
   session.oauthAccountId = oauthAccount.id;
   session.userId         = oauthAccount.user_id ?? undefined;
   await session.save();
+
+  if (oauthAccount.user_id) {
+    Sentry.setUser({ id: oauthAccount.user_id, username: oauthAccount.user_id });
+    Sentry.logger.info("user_login_completed", {
+      provider: "google",
+      oauthAccountId: oauthAccount.id,
+    });
+  } else {
+    Sentry.logger.info("oauth_account_pending_onboarding", {
+      provider: "google",
+      oauthAccountId: oauthAccount.id,
+    });
+  }
 
   // Clear the CSRF state cookie and redirect
   const destination = oauthAccount.user_id ? "/" : "/onboarding";

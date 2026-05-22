@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 import { ALL_GRADES } from "@/lib/utils";
@@ -250,6 +251,16 @@ export async function POST(req: NextRequest) {
       .leftJoin("boards", "climbs.board_id", "boards.id")
       .where("climbs.id", id)
       .first();
+
+    Sentry.logger.info("climb_created", {
+      climbId: id,
+      grade,
+      boardId,
+      boardName: board.name,
+      angle: resolvedAngle ?? null,
+      hasSetter: !!setterName,
+    });
+
     return NextResponse.json(toClimb(row, []), { status: 201 });
   } catch (err) {
     console.error(err);

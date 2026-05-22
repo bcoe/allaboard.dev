@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -147,6 +148,17 @@ export async function POST(
     });
 
     const tick = await db("ticks").where({ id: tickId }).first();
+
+    Sentry.logger.info("tick_created", {
+      climbId: id,
+      climbGrade: climb.grade,
+      suggestedGrade: suggestedGrade ?? null,
+      rating,
+      sent: sent ?? true,
+      attempts: attempts ?? null,
+      hasInstagramUrl: !!resolvedUrl,
+    });
+
     return NextResponse.json(toTick(tick), { status: 201 });
   } catch (err) {
     console.error(err);

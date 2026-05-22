@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -59,7 +60,12 @@ export async function POST(req: NextRequest) {
     const { userId, climbId, date, attempts, sent, notes, boardType, angle, durationMinutes, feelRating } =
       await req.json() as Record<string, unknown>;
 
-    if (userId !== resolvedId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (userId !== resolvedId) {
+      Sentry.logger.warn("log_entry_create_forbidden", {
+        bodyUserId: typeof userId === "string" ? userId : null,
+      });
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     // Find or create a session for this user+date
     let session = await db("sessions").where({ user_id: userId, date }).first();

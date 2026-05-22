@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -104,6 +105,11 @@ export async function PATCH(
     const climb = await db("climbs").where({ id }).first();
     if (!climb) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (climb.author !== userId) {
+      Sentry.logger.warn("climb_update_forbidden", {
+        climbId: id,
+        ownerId: climb.author,
+        action: "patch",
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

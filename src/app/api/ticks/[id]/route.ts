@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -52,6 +53,11 @@ export async function PATCH(
     const tick = await db("ticks").where({ id }).first();
     if (!tick) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (tick.user_id !== userId) {
+      Sentry.logger.warn("tick_update_forbidden", {
+        tickId: id,
+        ownerId: tick.user_id,
+        action: "patch",
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -131,10 +137,17 @@ export async function DELETE(
     const tick = await db("ticks").where({ id }).first();
     if (!tick) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (tick.user_id !== userId) {
+      Sentry.logger.warn("tick_delete_forbidden", {
+        tickId: id,
+        ownerId: tick.user_id,
+        action: "delete",
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     await db("ticks").where({ id }).delete();
+
+    Sentry.logger.info("tick_deleted", { tickId: id, climbId: tick.climb_id });
 
     return new NextResponse(null, { status: 204 });
   } catch (err) {

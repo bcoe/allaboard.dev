@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 
@@ -74,6 +75,13 @@ export async function POST(req: NextRequest) {
   // Promote the session to a fully authenticated state
   session.userId = handle;
   await session.save();
+
+  Sentry.setUser({ id: handle, username: handle });
+  Sentry.logger.info("user_onboarded", {
+    handle,
+    boardName: board.name,
+    oauthAccountId: session.oauthAccountId,
+  });
 
   return NextResponse.json({ ok: true });
 }

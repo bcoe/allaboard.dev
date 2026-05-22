@@ -8,5 +8,7 @@ Sentry.init({
 
   tracesSampleRate: isDev ? 1.0 : 0.2,
 
+  enableLogs: true,
+
   debug: isDev,
 });
