@@ -26,7 +26,13 @@ Along with adding log lines, this skill configures logging following the Quick S
 
 ## Steps
 
-1. Analyze the codebase looking for the following; these represent good candidates for logging:
+1. Analyze the codebase for authorization and authentication logic. If there is an obvious central place to call `Sentry.setUser`, add it with the authenticated user’s stable identifier and any safe user context.
+   - Do not call `setUser` if the codebase already does so.
+   - Prefer setting user context once in the authentication/session lifecycle rather than adding user metadata to individual logs.
+   - If `setUser` is already instrumented, do not add `user`, `userId`, or similar metadata to log lines, since user context will already be attached to Sentry events.
+   - If a user is not yet fully authenticated, it is acceptable to include a temporary or external identifier on a log line, such as an OAuth provider user ID, when it helps investigate the flow. Avoid sensitive identifiers.
+
+2. Analyze the codebase looking for the following; these represent good candidates for logging:
    - Business events: `checkout_started`, `invoice_paid`, `email_sent`, etc.
    - State transitions: `job_queued`, `job_started`, `job_failed`, `job_retried`.
    - External dependency calls: log failures, retries, timeouts, degraded responses, and meaningful operational events. Don’t log every successful outbound call if spans already capture that.
@@ -34,7 +40,7 @@ Along with adding log lines, this skill configures logging following the Quick S
    - Data-processing decisions: skipped record, invalid payload, deduped event.
    - Rare branches and fallback paths: this may include describing steps in a complex algorithm, but logs should not be added liberally across many lines of code.
 
-2. Add log lines for the critical steps identified:
+3. Add log lines for the critical steps identified:
    - Log lines should use structured logging.
    - Prefer stable event names and structured fields over dynamically generated log messages.
    - Choose an appropriate log level based on the following guidelines:
@@ -54,6 +60,7 @@ Along with adding log lines, this skill configures logging following the Quick S
 - Logging full request or response bodies.
 - Logging secrets, passwords, tokens, or sensitive PII.
 - Adding logs to every line of a complex code path.
+- Avoid nested keys, in favor of top level properties on structured logs (Sentry currently indexes nested objects poorly for search).
 
 ## Code patterns
 
@@ -110,7 +117,7 @@ sentry_logger.error(
 
 ## Out of scope
 
-Sentry also provides tracing , metrics, and errors. Avoid adding log lines that are better represented as tracing telemetry or application KPIs.
+Sentry also provides tracing, metrics, and errors. Avoid adding log lines that are better represented as tracing telemetry or application KPIs.
 
 Keep the following guidance in mind:
 
@@ -118,3 +125,8 @@ Metrics tell you that something is happening: error rates are rising, latency is
 
 Errors are sent to Sentry when an error path is unhandled, or when captureException is explcitly called with an error object. In these cases we should
 not also log a line, as it is redundant.
+
+### References
+
+- When instrumenting codebase initially refer to [Sentry's Logs Quickstart](https://sentry.io/quickstart/logs/). Take into acccount the language of the codebase.
+- When configuring `setUser`, refer to [API Docs](https://docs.sentry.io/platforms/javascript/configuration/apis/#setUser). Take into account the language of the codebase.
