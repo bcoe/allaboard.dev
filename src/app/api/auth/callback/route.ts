@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 
@@ -11,6 +12,11 @@ export async function GET(req: NextRequest) {
   const storedState = req.cookies.get("oauth_state")?.value;
 
   if (!code || !state || state !== storedState) {
+    Sentry.logger.warn("oauth_callback_invalid_state", {
+      hasCode: !!code,
+      hasState: !!state,
+      hasStoredState: !!storedState,
+    });
     return NextResponse.redirect(`${origin}/?auth_error=invalid_state`);
   }
 
@@ -28,7 +34,9 @@ export async function GET(req: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    console.error("Token exchange failed:", await tokenRes.text());
+    Sentry.logger.error("oauth_token_exchange_failed", {
+      status: tokenRes.status,
+    });
     return NextResponse.redirect(`${origin}/?auth_error=token_exchange`);
   }
 
@@ -44,6 +52,9 @@ export async function GET(req: NextRequest) {
   });
 
   if (!profileRes.ok) {
+    Sentry.logger.error("oauth_profile_fetch_failed", {
+      status: profileRes.status,
+    });
     return NextResponse.redirect(`${origin}/?auth_error=profile_fetch`);
   }
 
@@ -73,6 +84,10 @@ export async function GET(req: NextRequest) {
         updated_at:          new Date(),
       })
       .returning("*");
+    Sentry.logger.info("oauth_account_created", {
+      provider: "google",
+      oauthAccountId: oauthAccount.id,
+    });
   } else {
     await db("oauth_accounts").where({ id: oauthAccount.id }).update({
       email,
@@ -100,6 +115,18 @@ export async function GET(req: NextRequest) {
 
   // Clear the CSRF state cookie and redirect
   const destination = oauthAccount.user_id ? "/" : "/onboarding";
+  if (oauthAccount.user_id) {
+    Sentry.setUser({ id: oauthAccount.user_id, username: oauthAccount.user_id });
+    Sentry.logger.info("user_logged_in", {
+      provider: "google",
+      userId: oauthAccount.user_id,
+    });
+  } else {
+    Sentry.logger.info("oauth_login_pending_onboarding", {
+      provider: "google",
+      oauthAccountId: oauthAccount.id,
+    });
+  }
   const response = NextResponse.redirect(`${origin}${destination}`);
   response.cookies.delete("oauth_state");
   return response;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 
@@ -38,6 +39,10 @@ export async function POST(req: NextRequest) {
   // Re-check handle availability (client debounce is UX only — always verify server-side)
   const existing = await db("users").where({ handle }).first();
   if (existing) {
+    Sentry.logger.warn("onboarding_handle_taken", {
+      handle,
+      oauthAccountId: session.oauthAccountId,
+    });
     return NextResponse.json({ error: "That name is already taken" }, { status: 409 });
   }
 
@@ -74,6 +79,12 @@ export async function POST(req: NextRequest) {
   // Promote the session to a fully authenticated state
   session.userId = handle;
   await session.save();
+
+  Sentry.setUser({ id: handle, username: handle });
+  Sentry.logger.info("user_onboarded", {
+    userId: handle,
+    homeBoard: board.name,
+  });
 
   return NextResponse.json({ ok: true });
 }

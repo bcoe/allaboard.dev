@@ -110,8 +110,11 @@ sentry_logger.error(
 
 ## Out of scope
 
-Sentry also provides tracing and metrics. Avoid adding log lines that are better represented as tracing telemetry or application KPIs.
+Sentry also provides tracing , metrics, and errors. Avoid adding log lines that are better represented as tracing telemetry or application KPIs.
 
 Keep the following guidance in mind:
 
 Metrics tell you that something is happening: error rates are rising, latency is increasing, or throughput has dropped. Tracing shows where the problem occurred by following a request through services, database queries, and external dependencies. Logs provide the detailed context needed to understand why a specific operation behaved the way it did: a retry was triggered, a payload was invalid, or a payment provider rejected a request. In practice, metrics detect problems, traces localize them, and logs explain them.
+
+Errors are sent to Sentry when an error path is unhandled, or when captureException is explcitly called with an error object. In these cases we should
+not also log a line, as it is redundant.

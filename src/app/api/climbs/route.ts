@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 import { ALL_GRADES } from "@/lib/utils";
@@ -159,7 +160,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ climbs: rows.map((r) => toClimb(r, byClimb[r.id] ?? [])), hasMore, total });
   } catch (err) {
-    console.error(err);
+    Sentry.logger.error("climbs_list_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return NextResponse.json({ error: "Failed to fetch climbs" }, { status: 500 });
   }
 }
@@ -217,6 +220,13 @@ export async function POST(req: NextRequest) {
     if (resolvedAngle !== null) dupQuery.where({ angle: resolvedAngle });
     const duplicate = await dupQuery.first();
     if (duplicate) {
+      Sentry.logger.warn("climb_create_duplicate", {
+        userId,
+        boardId,
+        grade,
+        angle: resolvedAngle,
+        existingClimbId: duplicate.id,
+      });
       return NextResponse.json(
         { error: "A climb with this name, grade, angle and board already exists" },
         { status: 409 },
@@ -250,9 +260,19 @@ export async function POST(req: NextRequest) {
       .leftJoin("boards", "climbs.board_id", "boards.id")
       .where("climbs.id", id)
       .first();
+    Sentry.logger.info("climb_created", {
+      climbId: id,
+      userId,
+      boardId,
+      grade,
+      angle: resolvedAngle,
+    });
     return NextResponse.json(toClimb(row, []), { status: 201 });
   } catch (err) {
-    console.error(err);
+    Sentry.logger.error("climb_create_failed", {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return NextResponse.json({ error: "Failed to create climb" }, { status: 500 });
   }
 }

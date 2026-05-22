@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -52,6 +53,11 @@ export async function PATCH(
     const tick = await db("ticks").where({ id }).first();
     if (!tick) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (tick.user_id !== userId) {
+      Sentry.logger.warn("tick_update_forbidden", {
+        tickId: id,
+        userId,
+        ownerId: tick.user_id,
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -131,14 +137,28 @@ export async function DELETE(
     const tick = await db("ticks").where({ id }).first();
     if (!tick) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (tick.user_id !== userId) {
+      Sentry.logger.warn("tick_delete_forbidden", {
+        tickId: id,
+        userId,
+        ownerId: tick.user_id,
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     await db("ticks").where({ id }).delete();
 
+    Sentry.logger.info("tick_deleted", {
+      tickId: id,
+      userId,
+      climbId: tick.climb_id,
+    });
+
     return new NextResponse(null, { status: 204 });
   } catch (err) {
-    console.error(err);
+    Sentry.logger.error("tick_delete_failed", {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return NextResponse.json({ error: "Failed to delete tick" }, { status: 500 });
   }
 }

@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -97,8 +98,9 @@ export async function POST(
   const userId = await resolveUserId(req);
   if (!userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
 
+  const { id } = await params;
+
   try {
-    const { id } = await params;
     const climb = await db("climbs").where({ id }).first();
     if (!climb) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -147,9 +149,21 @@ export async function POST(
     });
 
     const tick = await db("ticks").where({ id: tickId }).first();
+    Sentry.logger.info("tick_created", {
+      tickId,
+      climbId: id,
+      userId,
+      sent: sent ?? true,
+      attempts: attempts ?? null,
+      rating,
+    });
     return NextResponse.json(toTick(tick), { status: 201 });
   } catch (err) {
-    console.error(err);
+    Sentry.logger.error("tick_create_failed", {
+      userId,
+      climbId: id,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return NextResponse.json({ error: "Failed to save tick" }, { status: 500 });
   }
 }

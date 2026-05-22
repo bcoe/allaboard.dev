@@ -9,6 +9,8 @@ Sentry.init({
   // Tracing — capture all traces in dev, sample in production
   tracesSampleRate: isDev ? 1.0 : 0.2,
 
+  enableLogs: true,
+
   integrations: [
     Sentry.browserTracingIntegration(),
   ],
