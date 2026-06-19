@@ -850,6 +850,47 @@ paths:
           description: userId is not provided.
         "500":
           description: database error.
+  /api/users/{handle}/feature-flags:
+    patch:
+      summary: Set a single feature flag on the authenticated user's account.
+      parameters:
+        - name: handle
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "{ \"featureFlags\": { ... } } — the user's full flag object after the update."
+        "400":
+          description: flag is unknown or enabled is not a boolean.
+        "401":
+          description: not authenticated.
+        "403":
+          description: authenticated as a different user than handle.
+        "404":
+          description: the user does not exist.
+        "500":
+          description: database error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - flag
+                - enabled
+              properties:
+                flag:
+                  type: string
+                  description: the flag key to set (must be a known flag).
+                enabled:
+                  type: string
+                  description: boolean; the new value for the flag.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
   /api/users/{handle}/follow:
     post:
       summary: Follow a user.

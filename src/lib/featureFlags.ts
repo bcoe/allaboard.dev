@@ -11,7 +11,7 @@
  */
 
 /** Every flag the application knows about. Add new keys here. */
-export type FeatureFlagKey = "experimental_game";
+export type FeatureFlagKey = "experimental_game" | "fiesta_mode";
 
 /**
  * Default value for each flag when a user has no explicit setting. Keeping
@@ -22,6 +22,8 @@ export const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
   // Gates the experimental "Game" leaderboard route. Off by default; enabled
   // per-user to expose the experience to opted-in climbers.
   experimental_game: false,
+  // User-controlled "Fiesta Mode", toggled from their own profile page.
+  fiesta_mode: false,
 };
 
 export type FeatureFlags = Partial<Record<FeatureFlagKey, boolean>>;

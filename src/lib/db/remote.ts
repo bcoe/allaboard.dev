@@ -4,6 +4,7 @@
  */
 
 import { Board, Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity, Comment, InboxItem } from "@/lib/types";
+import type { FeatureFlags } from "@/lib/featureFlags";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -127,6 +128,17 @@ export async function getCurrentUser(): Promise<User | null> {
 
 export async function updateCurrentUser(userId: string, patch: Partial<Omit<User, "id">>): Promise<User> {
   return api<User>(`/users/${encodeURIComponent(userId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export async function setFeatureFlag(
+  handle: string,
+  flag: string,
+  enabled: boolean,
+): Promise<{ featureFlags: FeatureFlags }> {
+  return api<{ featureFlags: FeatureFlags }>(
+    `/users/${encodeURIComponent(handle)}/feature-flags`,
+    { method: "PATCH", body: JSON.stringify({ flag, enabled }) },
+  );
 }
 
 export async function getFollowers(handle: string): Promise<User[]> {

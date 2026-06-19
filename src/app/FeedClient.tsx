@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { FeedActivity } from "@/lib/types";
 import { getFeedActivities } from "@/lib/db";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth, useFeatureFlag } from "@/lib/auth-context";
 import { timeAgo } from "@/lib/utils";
 import GradeBadge from "@/components/GradeBadge";
 import StarRating from "@/components/StarRating";
@@ -17,6 +17,7 @@ type FeedTab = "all" | "following";
 
 export default function FeedClient() {
   const { user, loading: authLoading } = useAuth();
+  const fiestaMode = useFeatureFlag("fiesta_mode");
   const [tab, setTab]             = useState<FeedTab>("following");
   const [activities, setActivities] = useState<FeedActivity[]>([]);
   const [hasMore, setHasMore]     = useState(false);
@@ -54,6 +55,41 @@ export default function FeedClient() {
   useEffect(() => {
     if (!authLoading && !user && tab === "following") switchTab("all");
   }, [authLoading, user, tab]);
+
+  // 🎉 Fiesta Mode: confetti for the first 3 seconds of viewing the feed.
+  // Only runs when the user has the `fiesta_mode` feature flag enabled — for
+  // everyone else this effect returns immediately and no confetti is shown.
+  // canvas-confetti is imported dynamically so it never executes during SSR.
+  useEffect(() => {
+    if (!fiestaMode) return;
+
+    let interval: ReturnType<typeof setInterval>;
+    let timeout: ReturnType<typeof setTimeout>;
+    let cancelled = false;
+
+    function randomInRange(min: number, max: number) {
+      return Math.random() * (max - min) + min;
+    }
+
+    void import("canvas-confetti").then(({ default: confetti }) => {
+      if (cancelled) return;
+      interval = setInterval(() => {
+        confetti({
+          angle: randomInRange(55, 125),
+          spread: randomInRange(50, 70),
+          particleCount: randomInRange(50, 100),
+          origin: { y: 0.6 },
+        });
+      }, 250);
+      timeout = setTimeout(() => clearInterval(interval), 3000);
+    });
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [fiestaMode]);
 
   return (
     <>

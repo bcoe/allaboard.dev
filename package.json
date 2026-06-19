@@ -15,6 +15,7 @@
   "dependencies": {
     "@scalar/api-reference-react": "^0.9.18",
     "@sentry/nextjs": "^10.46.0",
+    "canvas-confetti": "^1.9.4",
     "echarts": "^6.0.0",
     "iron-session": "^8.0.4",
     "knex": "^3.1.0",
@@ -29,6 +30,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/canvas-confetti": "^1.9.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^20",
     "@types/pg": "^8.11.0",

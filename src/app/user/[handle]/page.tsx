@@ -17,11 +17,13 @@ import {
   importAuroraData,
   importMoonboardData,
   recalculateBoardDifficulty,
+  setFeatureFlag,
   type AuroraImportResult,
   type MoonboardImportResult,
   type BoardDifficultyResult,
 } from "@/lib/db";
 import { useAuth } from "@/lib/auth-context";
+import { isFeatureEnabled, type FeatureFlags } from "@/lib/featureFlags";
 import { ALL_GRADES, timeAgo } from "@/lib/utils";
 import UserAvatar from "@/components/UserAvatar";
 import GradeBadge from "@/components/GradeBadge";
@@ -469,6 +471,15 @@ export default function UserProfilePage() {
         })()}
       </section>
 
+      {/* Fiesta Mode — own profile only (protected; requires authentication) */}
+      {isOwn && currentUser && (
+        <FiestaModeToggle
+          handle={profileUser.handle}
+          enabled={isFeatureEnabled(currentUser.featureFlags, "fiesta_mode")}
+          onSaved={(featureFlags) => updateUser({ ...currentUser, featureFlags })}
+        />
+      )}
+
       {/* Import Data — own profile only */}
       {isOwn && (
         <ImportSection handle={profileUser.handle} onSuccess={reload} />
@@ -533,6 +544,64 @@ function Tile({ value, label, accent }: { value: number; label: string; accent?:
       <div className={`text-2xl font-bold ${accent ?? "text-white"}`}>{value}</div>
       <div className="text-stone-400 text-xs mt-0.5">{label}</div>
     </div>
+  );
+}
+
+function FiestaModeToggle({
+  handle,
+  enabled,
+  onSaved,
+}: {
+  handle: string;
+  enabled: boolean;
+  onSaved: (flags: FeatureFlags) => void;
+}) {
+  const [value, setValue] = useState(enabled);
+  const [saving, setSaving] = useState(false);
+
+  // Stay in sync if the source value changes (e.g. after an auth refresh).
+  useEffect(() => { setValue(enabled); }, [enabled]);
+
+  async function toggle() {
+    const next = !value;
+    setValue(next); // optimistic
+    setSaving(true);
+    try {
+      const { featureFlags } = await setFeatureFlag(handle, "fiesta_mode", next);
+      onSaved(featureFlags);
+    } catch {
+      setValue(!next); // revert on failure
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="mt-8 pb-2">
+      <h2 className="text-orange-400 font-semibold text-lg mb-3">Fiesta Mode</h2>
+      <div className="bg-stone-800 border border-stone-700 rounded-xl p-4 flex items-center justify-between gap-4">
+        <p className="text-stone-400 text-sm leading-relaxed">
+          Turn on Fiesta Mode for your account. 🎉
+        </p>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={value}
+          aria-label="Fiesta Mode"
+          disabled={saving}
+          onClick={() => void toggle()}
+          className={`relative shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${
+            value ? "bg-orange-500" : "bg-stone-600"
+          }`}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+              value ? "translate-x-6" : "translate-x-1"
+            }`}
+          />
+        </button>
+      </div>
+    </section>
   );
 }
 
