@@ -48,5 +48,6 @@ export async function GET() {
       ...(user.personal_best_moonboard ? { Moonboard: user.personal_best_moonboard } : {}),
     },
     points: user.points ?? 0,
+    featureFlags: user.feature_flags ?? {},
   });
 }

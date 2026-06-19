@@ -68,12 +68,18 @@ const LOG_IDS: Record<string, string> = {
 };
 
 export async function seed(knex: Knex): Promise<void> {
+  // ⚠️  DESTRUCTIVE — these clear ALL existing rows before re-seeding mock data.
+  // Commented out to prevent accidentally wiping a database that holds real
+  // data (running `seed` against it would otherwise delete every user/climb).
+  // Re-enable ONLY when you intentionally want a clean reset of a throwaway/dev
+  // database, then comment them back out.
+  //
   // Clear in reverse FK order
-  await knex("log_entries").del();
-  await knex("sessions").del();
-  await knex("beta_videos").del();
-  await knex("climbs").del();
-  await knex("users").del();
+  // await knex("log_entries").del();
+  // await knex("sessions").del();
+  // await knex("beta_videos").del();
+  // await knex("climbs").del();
+  // await knex("users").del();
 
   // ── Users ────────────────────────────────────────────────────────────────────
   await knex("users").insert([
@@ -84,6 +90,8 @@ export async function seed(knex: Knex): Promise<void> {
       home_board: "Kilter", home_board_angle: 40, joined_at: "2024-09-01",
       followers_count: 34, following_count: 12,
       personal_best_kilter: "V8", personal_best_moonboard: "V6",
+      // Opted into the experimental Game leaderboard.
+      feature_flags: { experimental_game: true },
     },
     {
       id: "beth_climbs", handle: "beth_climbs", display_name: "Beth Nakamura",
@@ -108,6 +116,8 @@ export async function seed(knex: Knex): Promise<void> {
       home_board: "Kilter", home_board_angle: 45, joined_at: "2024-06-10",
       followers_count: 112, following_count: 34,
       personal_best_kilter: "V10", personal_best_moonboard: "V8",
+      // Opted into the experimental Game leaderboard.
+      feature_flags: { experimental_game: true },
     },
     {
       id: "eli_boulders", handle: "eli_boulders", display_name: "Eli Park",

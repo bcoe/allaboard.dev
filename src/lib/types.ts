@@ -1,3 +1,5 @@
+import type { FeatureFlags } from "./featureFlags";
+
 export type Grade =
   | "V0" | "V1" | "V2" | "V3" | "V4" | "V5" | "V5+" | "V6" | "V7" | "V8" | "V8+"
   | "V9" | "V10" | "V11" | "V12" | "V13" | "V14" | "V15" | "V16"
@@ -97,6 +99,14 @@ export interface User {
   followingCount: number;
   personalBests: Partial<Record<string, Grade>>;
   points?: number;
+  /**
+   * Per-user feature flags, loaded at page load and used in routing decisions.
+   * Optional because ad-hoc `User` objects (e.g. an avatar's mini-profile) don't
+   * carry flags; the auth-bootstrap endpoints always populate it for the
+   * signed-in user. Read via `isFeatureEnabled` / `useFeatureFlag`, which
+   * default missing values from the registry.
+   */
+  featureFlags?: FeatureFlags;
   /** Only present when the authenticated user fetches their own profile. */
   apiToken?: string;
 }

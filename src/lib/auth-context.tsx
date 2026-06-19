@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import * as Sentry from "@sentry/nextjs";
 import type { User } from "./types";
+import { isFeatureEnabled, type FeatureFlagKey } from "./featureFlags";
 
 interface AuthContextValue {
   user: User | null;
@@ -61,4 +62,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   return useContext(AuthContext);
+}
+
+/**
+ * Read a single feature flag for the current user. Flags are loaded once at
+ * page load (via `/api/auth/me`), so this is a synchronous lookup against the
+ * already-resolved user. Logged-out visitors and users without an explicit
+ * value fall back to the registry default in `featureFlags.ts`.
+ */
+export function useFeatureFlag(key: FeatureFlagKey): boolean {
+  const { user } = useAuth();
+  return isFeatureEnabled(user?.featureFlags, key);
 }

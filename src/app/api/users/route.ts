@@ -26,6 +26,7 @@ function toUser(row: Record<string, unknown>) {
       ...(row.personal_best_moonboard ? { Moonboard: row.personal_best_moonboard } : {}),
     },
     points: row.points ?? 0,
+    featureFlags: row.feature_flags ?? {},
   };
 }
 
