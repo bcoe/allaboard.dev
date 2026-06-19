@@ -524,6 +524,31 @@ When adding a new feature, new tests may be added to cover that feature. However
 
 ---
 
+## Logging
+
+Logs are the default tool for understanding runtime behavior — cheap to add, and fine to remove once they've served their purpose. Be intentional: log the minimum needed to debug and operate the app. Structured logs go through Sentry (`Sentry.logger.*`); logging is enabled via `enableLogs: true` in all three `sentry.*.config.ts` files.
+
+### When to log
+- **Runtime decisions** — when the app branches (feature flags, redirects, paid vs. free tiers), log why the decision was made and what resulted. Makes cohort-specific bugs reproducible.
+- **Multi-step features** — log intermediate outcomes of pipelines (e.g. imports) so you can see *which* stage broke. Log a start record and a flat breakdown of the result.
+- **Audit / forensic events** — creates, updates, deletes, access, and permission changes. Capture who, what, and when. Useful for support root-causing and sometimes legally required.
+- **Error context** — for failures that don't (yet) throw, e.g. a retry loop or a 4xx from an upstream service. Prefer `Sentry.captureException()` for real exceptions (issue grouping, triage, Autofix); use a log line for the lead-up (retry count, upstream status code, decisions made). Don't duplicate a captured exception with a log message.
+
+### How to write logs
+- **Who / what / when** — set request-scoped identity once on `Sentry.getIsolationScope()` (done in `resolveUserId`); later logs in the request inherit it. Sentry adds trace context automatically.
+- **Levels** — `debug` (local only; filter before sending), `info` (most records), `warn` (recoverable, needs attention), `error` (non-exception failures such as an upstream 4xx).
+- **Structured, flat, scalar** — log flat objects of strings / numbers / booleans / null. Use snake_case keys with dot notation for nesting (`user.id`, `http.response.status_code`, `import.skipped.unknown_grade`). Extract the specific fields you'll search or alert on; never log raw objects.
+
+### What NOT to log
+- **Every function call or line** — that's what tracing and profiling are for.
+- **PII / secrets** — prefer opaque IDs (the user handle) over emails or names; never log passwords, tokens, or API keys. Be mindful of regulated data (age, gender, postal code) and standards like PCI, GDPR, CCPA, HIPAA.
+- **Large blobs** — full requests/responses, LLM prompts, webhook bodies. They carry both cost (volume-based billing) and risk (embedded secrets/PII). Log the specific fields you need instead.
+
+### Filtering & sampling
+Not all data is worth keeping. Use `beforeSend` / `beforeSendLog` to drop `debug` and development-environment logs and to scrub sensitive fields. Structured keys make selective censoring or dropping straightforward.
+
+---
+
 ## API Documentation
 
 Interactive API docs are served at `/api-docs` via [Scalar](https://scalar.com).
