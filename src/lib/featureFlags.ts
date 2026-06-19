@@ -19,9 +19,10 @@ export type FeatureFlagKey = "experimental_game" | "fiesta_mode";
  * baseline behavior is described in exactly one place.
  */
 export const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
-  // Gates the experimental "Game" leaderboard route. Off by default; enabled
-  // per-user to expose the experience to opted-in climbers.
-  experimental_game: false,
+  // Gates the experimental "Game" leaderboard route. Public by default; a user
+  // can still be opted out by explicitly setting this flag to false on their
+  // account.
+  experimental_game: true,
   // User-controlled "Fiesta Mode", toggled from their own profile page.
   fiesta_mode: false,
 };

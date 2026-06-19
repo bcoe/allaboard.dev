@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import * as Sentry from "@sentry/nextjs";
 import { FeedActivity } from "@/lib/types";
 import { getFeedActivities } from "@/lib/db";
 import { useAuth, useFeatureFlag } from "@/lib/auth-context";
@@ -61,6 +62,10 @@ export default function FeedClient() {
   // everyone else this effect returns immediately and no confetti is shown.
   // canvas-confetti is imported dynamically so it never executes during SSR.
   useEffect(() => {
+    // Runtime decision: this user has a feature flag enabled that exposes an
+    // experimental version of the feed.
+    Sentry.logger.info("Check Feature Flags", { featureFlag: "fiesta_mode", feedExperience: "fiesta" });
+
     if (!fiestaMode) return;
 
     let interval: ReturnType<typeof setInterval>;

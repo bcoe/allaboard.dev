@@ -13,6 +13,9 @@ Sentry.init({
     Sentry.browserTracingIntegration(),
   ],
 
+  // Turn on Sentry structured logs (Sentry.logger.*).
+  enableLogs: true,
+
   // Log Sentry activity to the browser console in development
   debug: isDev,
 });

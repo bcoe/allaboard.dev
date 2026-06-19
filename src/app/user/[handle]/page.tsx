@@ -1191,6 +1191,12 @@ function BoardDifficultySection() {
   const [result, setResult] = useState<BoardDifficultyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Runtime decision: this section is gated to the admin tier, which unlocks
+  // functionality standard accounts don't see.
+  useEffect(() => {
+    Sentry.logger.info("Check Account Tier", { tier: "admin", enableFeature: "board_difficulty" });
+  }, []);
+
   async function handleRecalculate() {
     if (
       !confirm(
