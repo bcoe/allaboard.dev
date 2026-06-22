@@ -539,6 +539,8 @@ Logs are the default tool for understanding runtime behavior — cheap to add, a
 - **Levels** — `debug` (local only; filter before sending), `info` (most records), `warn` (recoverable, needs attention), `error` (non-exception failures such as an upstream 4xx).
 - **Structured, flat, scalar** — log flat objects of strings / numbers / booleans / null. Use snake_case keys with dot notation for nesting (`user.id`, `http.response.status_code`, `import.skipped.unknown_grade`). Extract the specific fields you'll search or alert on; never log raw objects.
 
+  **Why snake_case, not camelCase?** Log keys aren't code variables — they're indexed and queried in other systems (Datadog, Elasticsearch, CloudWatch). snake_case wins there: tokenizers split `user_id` into `user`/`id` so partial searches hit, where `userId` is one opaque token. Acronyms stay clean (`http_response_code`, not `httpResponseCode`), and exact casing is preserved where it carries meaning (`pressure_kPa`). It's the lowest-common-denominator across polyglot services (TS/Python/Go), avoiding duplicate `userId`/`user_id`/`UserID` keys in one dashboard. And underscores read as spaces — `failed_login_attempts` parses faster than `failedLoginAttempts`, especially at 3 AM and for non-native English readers.
+
 ### What NOT to log
 - **Every function call or line** — that's what tracing and profiling are for.
 - **PII / secrets** — prefer opaque IDs (the user handle) over emails or names; never log passwords, tokens, or API keys. Be mindful of regulated data (age, gender, postal code) and standards like PCI, GDPR, CCPA, HIPAA.

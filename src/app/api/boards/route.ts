@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
 
     // Audit event: who created what, and when.
     Sentry.logger.info("Board created", {
-      action: "create", resource: "board", boardId: id, type,
+      action: "create", resource: "board", board_id: id, type,
     });
 
     const row = await db("boards").where({ id }).first();

@@ -107,10 +107,10 @@ export async function POST(
   };
 
   // Log how many ascents we parsed out of the upload before we start importing.
-  // If imports fail with ascentsFound=0, the problem is parsing the export file
+  // If imports fail with ascents_found=0, the problem is parsing the export file
   // — not the climb/tick insertion that follows.
   Sentry.logger.info("Aurora import parsed", {
-    ascentsFound: body.ascents.length,
+    ascents_found: body.ascents.length,
   });
 
   for (const ascent of body.ascents) {
@@ -187,17 +187,17 @@ export async function POST(
   const skipped = Object.values(skipDetails).reduce((a, b) => a + b, 0);
 
   // Log the outcome of each stage so a degenerate result is easy to diagnose:
-  // e.g. lots of skippedUnknownGrade points at the Font→V-scale conversion,
-  // while lots of skippedAlreadyImported just means the export was re-run.
+  // e.g. lots of skipped_unknown_grade points at the Font→V-scale conversion,
+  // while lots of skipped_already_imported just means the export was re-run.
   Sentry.logger.info("Aurora import complete", {
-    ascentsFound: body.ascents.length,
+    ascents_found: body.ascents.length,
     imported,
-    climbsCreated,
+    climbs_created: climbsCreated,
     skipped,
-    skippedUnknownGrade: skipDetails.unknownGrade,
-    skippedMissingName: skipDetails.missingName,
-    skippedInvalidAngle: skipDetails.invalidAngle,
-    skippedAlreadyImported: skipDetails.alreadyImported,
+    skipped_unknown_grade: skipDetails.unknownGrade,
+    skipped_missing_name: skipDetails.missingName,
+    skipped_invalid_angle: skipDetails.invalidAngle,
+    skipped_already_imported: skipDetails.alreadyImported,
   });
 
   return NextResponse.json({ imported, climbsCreated, skipped, skipDetails }, { status: 200 });

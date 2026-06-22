@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   // Audit event: a new account was created (who, and when). Useful for tracing
   // signups and answering "when was this account set up?".
   Sentry.logger.info("User account created", {
-    action: "create", resource: "user", userId: handle,
+    action: "create", resource: "user", user_id: handle,
   });
 
   // Link oauth_accounts → users

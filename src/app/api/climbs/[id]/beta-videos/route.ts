@@ -51,7 +51,7 @@ export async function POST(
     if (climb.author !== session.userId) {
       // Permission event: a non-owner attempted to add a beta video.
       Sentry.logger.warn("Forbidden beta video create", {
-        action: "create", resource: "beta_video", climbId: id,
+        action: "create", resource: "beta_video", climb_id: id,
         owner: climb.author, outcome: "forbidden",
       });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -85,26 +85,26 @@ export async function POST(
         if (attempt < MAX_ATTEMPTS) {
           // Lead-up to a possible failure — a log line, not an exception yet.
           Sentry.logger.error("Retrying Instagram oEmbed", {
-            attempt, maxAttempts: MAX_ATTEMPTS, statusCode: res.status, climbId: id,
+            attempt, max_attempts: MAX_ATTEMPTS, status_code: res.status, climb_id: id,
           });
         } else {
           // Exhausted retries: now it's a real error worth capturing.
           Sentry.captureException(new Error("Instagram oEmbed failed after retries"), {
             tags: { upstream: "instagram_oembed" },
-            extra: { attempts: MAX_ATTEMPTS, statusCode: res.status, climbId: id },
+            extra: { attempts: MAX_ATTEMPTS, status_code: res.status, climb_id: id },
           });
         }
       } catch (err) {
         // Network error or timeout — also transient.
         if (attempt < MAX_ATTEMPTS) {
           Sentry.logger.warn("Retrying Instagram oEmbed", {
-            attempt, maxAttempts: MAX_ATTEMPTS,
-            errorName: err instanceof Error ? err.name : "unknown", climbId: id,
+            attempt, max_attempts: MAX_ATTEMPTS,
+            error_name: err instanceof Error ? err.name : "unknown", climb_id: id,
           });
         } else {
           Sentry.captureException(err, {
             tags: { upstream: "instagram_oembed" },
-            extra: { attempts: MAX_ATTEMPTS, climbId: id },
+            extra: { attempts: MAX_ATTEMPTS, climb_id: id },
           });
         }
       }
@@ -121,8 +121,8 @@ export async function POST(
 
     // Audit event: who added a beta video to which climb, and when.
     Sentry.logger.info("Beta video created", {
-      action: "create", resource: "beta_video", betaVideoId: row.id,
-      climbId: id,
+      action: "create", resource: "beta_video", beta_video_id: row.id,
+      climb_id: id,
     });
 
     return NextResponse.json({
@@ -168,7 +168,7 @@ export async function DELETE(
     if (climb.author !== session.userId) {
       // Permission event: a non-owner attempted to remove a beta video.
       Sentry.logger.warn("Forbidden beta video delete", {
-        action: "delete", resource: "beta_video", climbId: id,
+        action: "delete", resource: "beta_video", climb_id: id,
         owner: climb.author, outcome: "forbidden",
       });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -179,7 +179,7 @@ export async function DELETE(
 
     // Audit event: who removed a beta video from which climb, and when.
     Sentry.logger.info("Beta video deleted", {
-      action: "delete", resource: "beta_video", climbId: id,
+      action: "delete", resource: "beta_video", climb_id: id,
     });
 
     return NextResponse.json({ ok: true });

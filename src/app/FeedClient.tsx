@@ -64,7 +64,7 @@ export default function FeedClient() {
   useEffect(() => {
     // Runtime decision: this user has a feature flag enabled that exposes an
     // experimental version of the feed.
-    Sentry.logger.info("Check Feature Flags", { featureFlag: "fiesta_mode", feedExperience: fiestaMode });
+    Sentry.logger.info("Check Feature Flags", { feature_flag: "fiesta_mode", feed_experience: fiestaMode });
 
     if (!fiestaMode) return;
 

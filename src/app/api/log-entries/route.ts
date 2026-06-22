@@ -92,8 +92,8 @@ export async function POST(req: NextRequest) {
 
     // Audit event: who created what, and when.
     Sentry.logger.info("Log entry created", {
-      action: "create", resource: "log_entry", logEntryId: id,
-      climbId: String(climbId), sent: Boolean(sent),
+      action: "create", resource: "log_entry", log_entry_id: id,
+      climb_id: String(climbId), sent: Boolean(sent),
     });
 
     const entry = await db("log_entries").where({ id }).first();

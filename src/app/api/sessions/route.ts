@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
 
     // Audit event: who created what, and when.
     Sentry.logger.info("Session created", {
-      action: "create", resource: "session", sessionId: id,
+      action: "create", resource: "session", session_id: id,
     });
 
     const row = await db("sessions").where({ id }).first();

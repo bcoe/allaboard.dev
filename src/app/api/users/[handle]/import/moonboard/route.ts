@@ -213,15 +213,15 @@ export async function POST(
   };
 
   // Log how many climb records we parsed out of the upload before we start
-  // importing. If imports fail with recordsFound=0, the problem is parsing the
+  // importing. If imports fail with records_found=0, the problem is parsing the
   // export file — not the climb/tick insertion that follows.
   const recordsFound = body.entries.reduce(
     (sum, entry) => sum + (Array.isArray(entry?.data?.Data) ? entry.data.Data.length : 0),
     0,
   );
   Sentry.logger.info("Moonboard import parsed", {
-    sessionsReceived: body.entries.length,
-    recordsFound,
+    sessions_received: body.entries.length,
+    records_found: recordsFound,
   });
 
   for (const entry of body.entries) {
@@ -335,18 +335,18 @@ export async function POST(
   const skipped = Object.values(skipDetails).reduce((a, b) => a + b, 0);
 
   // Log the outcome of each stage so a degenerate result is easy to diagnose:
-  // e.g. lots of skippedUnknownGrade points at the Font→V-scale conversion,
-  // while lots of skippedNotSent just means the export was mostly projects.
+  // e.g. lots of skipped_unknown_grade points at the Font→V-scale conversion,
+  // while lots of skipped_not_sent just means the export was mostly projects.
   Sentry.logger.info("Moonboard import complete", {
-    recordsFound,
+    records_found: recordsFound,
     imported,
-    climbsCreated,
-    boardsCreated,
+    climbs_created: climbsCreated,
+    boards_created: boardsCreated,
     skipped,
-    skippedNotSent: skipDetails.notSent,
-    skippedUnknownGrade: skipDetails.unknownGrade,
-    skippedMissingName: skipDetails.missingName,
-    skippedAlreadyImported: skipDetails.alreadyImported,
+    skipped_not_sent: skipDetails.notSent,
+    skipped_unknown_grade: skipDetails.unknownGrade,
+    skipped_missing_name: skipDetails.missingName,
+    skipped_already_imported: skipDetails.alreadyImported,
   });
 
   return NextResponse.json({ imported, climbsCreated, boardsCreated, skipped, skipDetails }, { status: 200 });

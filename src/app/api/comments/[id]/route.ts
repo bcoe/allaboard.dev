@@ -41,7 +41,7 @@ export async function PATCH(
     if (comment.user_id !== userId) {
       // Permission event: a non-owner attempted to edit this comment.
       Sentry.logger.warn("Forbidden comment update", {
-        action: "update", resource: "comment", commentId: id,
+        action: "update", resource: "comment", comment_id: id,
         owner: comment.user_id, outcome: "forbidden",
       });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -54,7 +54,7 @@ export async function PATCH(
 
     // Audit event: who updated what, and when.
     Sentry.logger.info("Comment updated", {
-      action: "update", resource: "comment", commentId: id,
+      action: "update", resource: "comment", comment_id: id,
     });
     const updated = await db("comments")
       .join("users", "users.id", "comments.user_id")
@@ -114,7 +114,7 @@ export async function DELETE(
     if (comment.user_id !== userId) {
       // Permission event: a non-owner attempted to delete this comment.
       Sentry.logger.warn("Forbidden comment delete", {
-        action: "delete", resource: "comment", commentId: id,
+        action: "delete", resource: "comment", comment_id: id,
         owner: comment.user_id, outcome: "forbidden",
       });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -124,8 +124,8 @@ export async function DELETE(
 
     // Audit event: who deleted what, and when.
     Sentry.logger.info("Comment deleted", {
-      action: "delete", resource: "comment", commentId: id,
-      tickId: comment.tick_id,
+      action: "delete", resource: "comment", comment_id: id,
+      tick_id: comment.tick_id,
     });
 
     return new NextResponse(null, { status: 204 });
