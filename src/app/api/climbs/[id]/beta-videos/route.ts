@@ -60,16 +60,55 @@ export async function POST(
     const { url } = await req.json() as { url: string };
     if (!url?.trim()) return NextResponse.json({ error: "url is required" }, { status: 400 });
 
-    // Fetch thumbnail from instagram oEmbed
+    // Fetch the thumbnail from Instagram's oEmbed API. This is a flaky upstream,
+    // so we retry transient failures (network/timeout and 429/5xx) a few times.
+    // Each retry is logged with the attempt count and status code — useful
+    // lead-up context if it ultimately fails. Only when we exhaust every attempt
+    // do we capture an exception, so a real Instagram outage surfaces in Sentry
+    // (with issue grouping/triage) rather than as repeated log noise. The video
+    // is saved without a thumbnail either way, so a failure never breaks the request.
+    const MAX_ATTEMPTS = 3;
+    const oembedUrl = `https://api.instagram.com/oembed?url=${encodeURIComponent(url)}&maxwidth=200`;
     let thumbnail: string | null = null;
-    try {
-      const oembedUrl = `https://api.instagram.com/oembed?url=${encodeURIComponent(url)}&maxwidth=200`;
-      const res = await fetch(oembedUrl, { signal: AbortSignal.timeout(4000) });
-      if (res.ok) {
-        const data = await res.json() as { thumbnail_url?: string };
-        thumbnail = data.thumbnail_url ?? null;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const res = await fetch(oembedUrl, { signal: AbortSignal.timeout(4000) });
+        if (res.ok) {
+          const data = await res.json() as { thumbnail_url?: string };
+          thumbnail = data.thumbnail_url ?? null;
+          break;
+        }
+        // A non-transient status (e.g. 404 for a deleted/private post) isn't worth
+        // retrying — give up quietly with no thumbnail.
+        if (res.status !== 429 && res.status < 500) break;
+        if (attempt < MAX_ATTEMPTS) {
+          // Lead-up to a possible failure — a log line, not an exception yet.
+          Sentry.logger.error("Retrying Instagram oEmbed", {
+            attempt, maxAttempts: MAX_ATTEMPTS, statusCode: res.status, climbId: id,
+          });
+        } else {
+          // Exhausted retries: now it's a real error worth capturing.
+          Sentry.captureException(new Error("Instagram oEmbed failed after retries"), {
+            tags: { upstream: "instagram_oembed" },
+            extra: { attempts: MAX_ATTEMPTS, statusCode: res.status, climbId: id },
+          });
+        }
+      } catch (err) {
+        // Network error or timeout — also transient.
+        if (attempt < MAX_ATTEMPTS) {
+          Sentry.logger.warn("Retrying Instagram oEmbed", {
+            attempt, maxAttempts: MAX_ATTEMPTS,
+            errorName: err instanceof Error ? err.name : "unknown", climbId: id,
+          });
+        } else {
+          Sentry.captureException(err, {
+            tags: { upstream: "instagram_oembed" },
+            extra: { attempts: MAX_ATTEMPTS, climbId: id },
+          });
+        }
       }
-    } catch { /* leave thumbnail null */ }
+    }
 
     const [maxOrder] = await db("beta_videos")
       .where({ climb_id: id })
