@@ -53,7 +53,7 @@ export async function PATCH(
   if (userId !== handle) {
     // Permission event: attempted to change another user's feature flags.
     Sentry.logger.warn("Forbidden feature flag update", {
-      action: "update", resource: "feature_flag", userId: handle,
+      action: "update", resource: "feature_flag", user_id: handle,
       owner: handle, outcome: "forbidden",
     });
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -80,7 +80,7 @@ export async function PATCH(
 
     // Audit event: who changed which flag, to what value, and when.
     Sentry.logger.info("Feature flag updated", {
-      action: "update", resource: "feature_flag", userId: handle,
+      action: "update", resource: "feature_flag", user_id: handle,
       flag, enabled,
     });
 

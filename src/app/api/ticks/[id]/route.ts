@@ -55,7 +55,7 @@ export async function PATCH(
     if (tick.user_id !== userId) {
       // Permission event: a non-owner attempted to edit this tick.
       Sentry.logger.warn("Forbidden tick update", {
-        action: "update", resource: "tick", tickId: id,
+        action: "update", resource: "tick", tick_id: id,
         owner: tick.user_id, outcome: "forbidden",
       });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -96,7 +96,7 @@ export async function PATCH(
 
     // Audit event: who updated what, which fields changed, and when.
     Sentry.logger.info("Tick updated", {
-      action: "update", resource: "tick", tickId: id,
+      action: "update", resource: "tick", tick_id: id,
       fields: Object.keys(patch).filter((k) => k !== "updated_at").join(","),
     });
 
@@ -149,7 +149,7 @@ export async function DELETE(
       Sentry.logger.warn("Forbidden tick delete", {
         action: "delete",
         resource: "tick",
-        tickId: id,
+        tick_id: id,
         owner: tick.user_id,
         outcome: "forbidden",
       });
@@ -164,8 +164,8 @@ export async function DELETE(
     Sentry.logger.info("Tick deleted", {
       action: "delete",
       resource: "tick",
-      tickId: id,
-      climbId: tick.climb_id,
+      tick_id: id,
+      climb_id: tick.climb_id,
     });
 
     return new NextResponse(null, { status: 204 });

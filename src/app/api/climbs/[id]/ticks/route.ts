@@ -149,7 +149,7 @@ export async function POST(
 
     // Audit event: who created what, and when.
     Sentry.logger.info("Tick created", {
-      action: "create", resource: "tick", tickId, climbId: id,
+      action: "create", resource: "tick", tick_id: tickId, climb_id: id,
     });
 
     const tick = await db("ticks").where({ id: tickId }).first();

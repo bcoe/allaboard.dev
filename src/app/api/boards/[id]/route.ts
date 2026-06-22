@@ -47,7 +47,7 @@ export async function PATCH(
     if (board.created_by !== userId) {
       // Permission event: a non-creator attempted to edit this board.
       Sentry.logger.warn("Forbidden board update", {
-        action: "update", resource: "board", boardId: id,
+        action: "update", resource: "board", board_id: id,
         owner: board.created_by, outcome: "forbidden",
       });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -69,7 +69,7 @@ export async function PATCH(
 
     // Audit event: who updated what, which fields changed, and when.
     Sentry.logger.info("Board updated", {
-      action: "update", resource: "board", boardId: id,
+      action: "update", resource: "board", board_id: id,
       fields: Object.keys(patch).join(","),
     });
 

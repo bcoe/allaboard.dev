@@ -155,8 +155,8 @@ export async function POST(req: NextRequest) {
 
     // Audit event: who created what, and when.
     Sentry.logger.info("Comment created", {
-      action: "create", resource: "comment", commentId: id,
-      tickId, isReply: Boolean(parentCommentId),
+      action: "create", resource: "comment", comment_id: id,
+      tick_id: tickId, is_reply: Boolean(parentCommentId),
     });
 
     const comment = await db("comments")

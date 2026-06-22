@@ -92,7 +92,7 @@ export async function PATCH(
     if (userId !== handle) {
       // Permission event: attempted to edit another user's profile.
       Sentry.logger.warn("Forbidden profile update", {
-        action: "update", resource: "user", userId: handle,
+        action: "update", resource: "user", user_id: handle,
         owner: handle, outcome: "forbidden",
       });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -119,7 +119,7 @@ export async function PATCH(
 
     // Audit event: who updated their profile, which fields changed, and when.
     Sentry.logger.info("Profile updated", {
-      action: "update", resource: "user", userId: handle,
+      action: "update", resource: "user", user_id: handle,
       fields: Object.keys(patch).join(","),
     });
 

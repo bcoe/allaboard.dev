@@ -107,7 +107,7 @@ export async function PATCH(
     if (climb.author !== userId) {
       // Permission event: a non-owner attempted to edit this climb.
       Sentry.logger.warn("Forbidden climb update", {
-        action: "update", resource: "climb", climbId: id,
+        action: "update", resource: "climb", climb_id: id,
         owner: climb.author, outcome: "forbidden",
       });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -132,7 +132,7 @@ export async function PATCH(
 
     // Audit event: who updated what, which fields changed, and when.
     Sentry.logger.info("Climb updated", {
-      action: "update", resource: "climb", climbId: id,
+      action: "update", resource: "climb", climb_id: id,
       fields: Object.keys(patch).join(","),
     });
 

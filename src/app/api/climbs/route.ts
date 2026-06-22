@@ -243,7 +243,7 @@ export async function POST(req: NextRequest) {
     Sentry.logger.info("Climb created", {
       action: "create",
       resource: "climb",
-      climbId: id,
+      climb_id: id,
     });
 
     // Keep the setters lookup table in sync

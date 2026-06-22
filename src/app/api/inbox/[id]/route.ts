@@ -39,7 +39,7 @@ export async function PATCH(
     if (item.user_id !== userId) {
       // Permission event: attempted to mark another user's inbox item read.
       Sentry.logger.warn("Forbidden inbox update", {
-        action: "update", resource: "inbox_item", inboxItemId: id,
+        action: "update", resource: "inbox_item", inbox_item_id: id,
         owner: item.user_id, outcome: "forbidden",
       });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
