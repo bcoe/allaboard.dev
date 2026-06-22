@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -46,6 +47,11 @@ export async function POST(
       .onConflict(["follower_id", "following_id"])
       .ignore();
 
+    // Audit event: who followed whom, and when.
+    Sentry.logger.info("Follow created", {
+      action: "create", resource: "follow", target: target.id,
+    });
+
     return NextResponse.json({ following: true });
   } catch (err) {
     console.error(err);
@@ -84,6 +90,11 @@ export async function DELETE(
     await db("follows")
       .where({ follower_id: userId, following_id: target.id })
       .delete();
+
+    // Audit event: who unfollowed whom, and when.
+    Sentry.logger.info("Follow deleted", {
+      action: "delete", resource: "follow", target: target.id,
+    });
 
     return NextResponse.json({ following: false });
   } catch (err) {

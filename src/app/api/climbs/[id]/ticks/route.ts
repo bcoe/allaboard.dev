@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { v4 as uuidv4 } from "uuid";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
@@ -144,6 +145,11 @@ export async function POST(
       sent:            sent ?? true,
       created_at:      now,
       updated_at:      now,
+    });
+
+    // Audit event: who created what, and when.
+    Sentry.logger.info("Tick created", {
+      action: "create", resource: "tick", tickId, climbId: id,
     });
 
     const tick = await db("ticks").where({ id: tickId }).first();

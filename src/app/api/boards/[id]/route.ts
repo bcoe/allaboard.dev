@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 import { toBoard } from "../route";
@@ -44,6 +45,11 @@ export async function PATCH(
     const board = await db("boards").where({ id }).first();
     if (!board) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (board.created_by !== userId) {
+      // Permission event: a non-creator attempted to edit this board.
+      Sentry.logger.warn("Forbidden board update", {
+        action: "update", resource: "board", boardId: id,
+        owner: board.created_by, outcome: "forbidden",
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -60,6 +66,13 @@ export async function PATCH(
     }
 
     await db("boards").where({ id }).update(patch);
+
+    // Audit event: who updated what, which fields changed, and when.
+    Sentry.logger.info("Board updated", {
+      action: "update", resource: "board", boardId: id,
+      fields: Object.keys(patch).join(","),
+    });
+
     const updated = await db("boards").where({ id }).first();
     return NextResponse.json(toBoard(updated));
   } catch (err) {

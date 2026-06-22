@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -52,6 +53,11 @@ export async function PATCH(
     const tick = await db("ticks").where({ id }).first();
     if (!tick) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (tick.user_id !== userId) {
+      // Permission event: a non-owner attempted to edit this tick.
+      Sentry.logger.warn("Forbidden tick update", {
+        action: "update", resource: "tick", tickId: id,
+        owner: tick.user_id, outcome: "forbidden",
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -87,6 +93,12 @@ export async function PATCH(
     if (instagramUrl !== undefined)   patch.instagram_url  = instagramUrl?.trim() || null;
 
     await db("ticks").where({ id }).update(patch);
+
+    // Audit event: who updated what, which fields changed, and when.
+    Sentry.logger.info("Tick updated", {
+      action: "update", resource: "tick", tickId: id,
+      fields: Object.keys(patch).filter((k) => k !== "updated_at").join(","),
+    });
 
     const updated = await db("ticks").where({ id }).first();
     return NextResponse.json(updated);
@@ -131,10 +143,30 @@ export async function DELETE(
     const tick = await db("ticks").where({ id }).first();
     if (!tick) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (tick.user_id !== userId) {
+      // Permission event: someone tried to delete a tick they don't own.
+      // Logging denied access — who attempted what on whose resource — is useful
+      // for spotting abuse and is required by some standards (e.g. HIPAA).
+      Sentry.logger.warn("Forbidden tick delete", {
+        action: "delete",
+        resource: "tick",
+        tickId: id,
+        owner: tick.user_id,
+        outcome: "forbidden",
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     await db("ticks").where({ id }).delete();
+
+    // Audit event: who deleted what, and when (Sentry stamps the timestamp).
+    // This is the log that answers "where did my tick go?" — it shows the tick
+    // was deleted by a specific user, not lost by the application.
+    Sentry.logger.info("Tick deleted", {
+      action: "delete",
+      resource: "tick",
+      tickId: id,
+      climbId: tick.climb_id,
+    });
 
     return new NextResponse(null, { status: 204 });
   } catch (err) {

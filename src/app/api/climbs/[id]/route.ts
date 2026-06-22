@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -104,6 +105,11 @@ export async function PATCH(
     const climb = await db("climbs").where({ id }).first();
     if (!climb) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (climb.author !== userId) {
+      // Permission event: a non-owner attempted to edit this climb.
+      Sentry.logger.warn("Forbidden climb update", {
+        action: "update", resource: "climb", climbId: id,
+        owner: climb.author, outcome: "forbidden",
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -123,6 +129,12 @@ export async function PATCH(
     }
 
     await db("climbs").where({ id }).update(patch);
+
+    // Audit event: who updated what, which fields changed, and when.
+    Sentry.logger.info("Climb updated", {
+      action: "update", resource: "climb", climbId: id,
+      fields: Object.keys(patch).join(","),
+    });
 
     const updated = await db("climbs")
       .select("climbs.*", "boards.name as board_name")

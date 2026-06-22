@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import db from "@/lib/server/db";
@@ -90,6 +91,8 @@ export async function POST(req: NextRequest) {
     if (!session.userId) {
       return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
     }
+    // Attach identity to the request scope so logs inherit user.id.
+    Sentry.getIsolationScope().setUser({ id: session.userId });
 
     const { name, type, location, description } =
       await req.json() as { name: string; type: string; location?: string; description?: string };
@@ -119,6 +122,11 @@ export async function POST(req: NextRequest) {
       location:    location?.trim() || null,
       description: description?.trim() || null,
       created_by:  session.userId,
+    });
+
+    // Audit event: who created what, and when.
+    Sentry.logger.info("Board created", {
+      action: "create", resource: "board", boardId: id, type,
     });
 
     const row = await db("boards").where({ id }).first();

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import db from "@/lib/server/db";
@@ -64,6 +65,16 @@ export async function POST(req: NextRequest) {
     home_board_angle:     40,
     email:                oauthAccount.email,
     profile_picture_url:  oauthAccount.profile_picture_url ?? null,
+  });
+
+  // Attach the new account's identity to the request scope so this and any
+  // later logs in the request carry user.id.
+  Sentry.getIsolationScope().setUser({ id: handle });
+
+  // Audit event: a new account was created (who, and when). Useful for tracing
+  // signups and answering "when was this account set up?".
+  Sentry.logger.info("User account created", {
+    action: "create", resource: "user", userId: handle,
   });
 
   // Link oauth_accounts → users

@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { v4 as uuidv4 } from "uuid";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
@@ -235,6 +236,14 @@ export async function POST(req: NextRequest) {
       author:      userId,
       setter:      setterName,
       sends:       0,
+    });
+
+    // Audit event: who created what, and when (Sentry stamps the timestamp).
+    // Makes it possible to answer "where did this climb come from?" later.
+    Sentry.logger.info("Climb created", {
+      action: "create",
+      resource: "climb",
+      climbId: id,
     });
 
     // Keep the setters lookup table in sync

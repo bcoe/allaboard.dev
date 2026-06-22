@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { v4 as uuidv4 } from "uuid";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
@@ -92,12 +93,25 @@ export async function POST(req: NextRequest) {
     const { userId, date, boardType, angle, durationMinutes, feelRating } =
       await req.json() as Record<string, unknown>;
 
-    if (userId !== resolvedId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (userId !== resolvedId) {
+      // Permission event: attempted to create a session for another user.
+      Sentry.logger.warn("Forbidden session create", {
+        action: "create", resource: "session",
+        owner: String(userId), outcome: "forbidden",
+      });
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const id = uuidv4();
     await db("sessions").insert({
       id, user_id: userId, date, board_type: boardType,
       angle: angle ?? 40, duration_minutes: durationMinutes ?? 60, feel_rating: feelRating ?? 3,
     });
+
+    // Audit event: who created what, and when.
+    Sentry.logger.info("Session created", {
+      action: "create", resource: "session", sessionId: id,
+    });
+
     const row = await db("sessions").where({ id }).first();
     return NextResponse.json(await buildSession(row), { status: 201 });
   } catch (err) {

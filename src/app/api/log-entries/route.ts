@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { v4 as uuidv4 } from "uuid";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
@@ -59,7 +60,14 @@ export async function POST(req: NextRequest) {
     const { userId, climbId, date, attempts, sent, notes, boardType, angle, durationMinutes, feelRating } =
       await req.json() as Record<string, unknown>;
 
-    if (userId !== resolvedId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (userId !== resolvedId) {
+      // Permission event: attempted to log an entry for another user.
+      Sentry.logger.warn("Forbidden log entry create", {
+        action: "create", resource: "log_entry",
+        owner: String(userId), outcome: "forbidden",
+      });
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     // Find or create a session for this user+date
     let session = await db("sessions").where({ user_id: userId, date }).first();
@@ -81,6 +89,12 @@ export async function POST(req: NextRequest) {
     if (sent) {
       await db("climbs").where({ id: climbId }).increment("sends", 1);
     }
+
+    // Audit event: who created what, and when.
+    Sentry.logger.info("Log entry created", {
+      action: "create", resource: "log_entry", logEntryId: id,
+      climbId: String(climbId), sent: Boolean(sent),
+    });
 
     const entry = await db("log_entries").where({ id }).first();
     return NextResponse.json({

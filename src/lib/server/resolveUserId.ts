@@ -9,6 +9,7 @@
  */
 
 import type { NextRequest } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { sessionOptions, type SessionData } from "./session";
@@ -20,12 +21,21 @@ const UUID_V4_RE =
 export async function resolveUserId(req: NextRequest): Promise<string | null> {
   // 1. Iron-session cookie (standard browser auth)
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (session?.userId) return session.userId;
+  if (session?.userId) {
+    // Attach identity to the request scope once, so every log emitted later in
+    // the request carries user.id automatically — no need to repeat it per log.
+    Sentry.getIsolationScope().setUser({ id: session.userId });
+    return session.userId;
+  }
 
   // 2. API token query parameter
   const token = req.nextUrl.searchParams.get("token");
   if (!token || !UUID_V4_RE.test(token)) return null;
 
   const row = await db("users").where({ api_token: token }).select("id").first();
-  return row?.id ?? null;
+  if (row?.id) {
+    Sentry.getIsolationScope().setUser({ id: row.id });
+    return row.id;
+  }
+  return null;
 }

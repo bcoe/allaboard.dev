@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import db from "@/lib/server/db";
@@ -40,12 +41,19 @@ export async function POST(
 ) {
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
   if (!session.userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  // Attach identity to the request scope so logs inherit user.id.
+  Sentry.getIsolationScope().setUser({ id: session.userId });
 
   try {
     const { id } = await params;
     const climb = await db("climbs").where({ id }).first();
     if (!climb) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (climb.author !== session.userId) {
+      // Permission event: a non-owner attempted to add a beta video.
+      Sentry.logger.warn("Forbidden beta video create", {
+        action: "create", resource: "beta_video", climbId: id,
+        owner: climb.author, outcome: "forbidden",
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -71,6 +79,12 @@ export async function POST(
     const [row] = await db("beta_videos")
       .insert({ climb_id: id, url: url.trim(), thumbnail, sort_order })
       .returning("*");
+
+    // Audit event: who added a beta video to which climb, and when.
+    Sentry.logger.info("Beta video created", {
+      action: "create", resource: "beta_video", betaVideoId: row.id,
+      climbId: id,
+    });
 
     return NextResponse.json({
       url:       row.url,
@@ -105,17 +119,30 @@ export async function DELETE(
 ) {
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
   if (!session.userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  // Attach identity to the request scope so logs inherit user.id.
+  Sentry.getIsolationScope().setUser({ id: session.userId });
 
   try {
     const { id } = await params;
     const climb = await db("climbs").where({ id }).first();
     if (!climb) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (climb.author !== session.userId) {
+      // Permission event: a non-owner attempted to remove a beta video.
+      Sentry.logger.warn("Forbidden beta video delete", {
+        action: "delete", resource: "beta_video", climbId: id,
+        owner: climb.author, outcome: "forbidden",
+      });
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const { url } = await req.json() as { url: string };
     await db("beta_videos").where({ climb_id: id, url }).delete();
+
+    // Audit event: who removed a beta video from which climb, and when.
+    Sentry.logger.info("Beta video deleted", {
+      action: "delete", resource: "beta_video", climbId: id,
+    });
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error(err);

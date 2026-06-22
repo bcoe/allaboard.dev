@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -35,7 +36,14 @@ export async function PATCH(
     const { id } = await params;
     const item = await db("inbox_items").where({ id }).first();
     if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (item.user_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (item.user_id !== userId) {
+      // Permission event: attempted to mark another user's inbox item read.
+      Sentry.logger.warn("Forbidden inbox update", {
+        action: "update", resource: "inbox_item", inboxItemId: id,
+        owner: item.user_id, outcome: "forbidden",
+      });
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     await db("inbox_items").where({ id }).update({ read: true });
     return NextResponse.json({ read: true });

@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { v4 as uuidv4 } from "uuid";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
@@ -150,6 +151,12 @@ export async function POST(req: NextRequest) {
       user_id: userId,
       parent_comment_id: parentCommentId || null,
       body: body.trim(),
+    });
+
+    // Audit event: who created what, and when.
+    Sentry.logger.info("Comment created", {
+      action: "create", resource: "comment", commentId: id,
+      tickId, isReply: Boolean(parentCommentId),
     });
 
     const comment = await db("comments")

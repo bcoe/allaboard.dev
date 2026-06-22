@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 import {
@@ -49,7 +50,14 @@ export async function PATCH(
   if (!userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
 
   const { handle } = await params;
-  if (userId !== handle) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (userId !== handle) {
+    // Permission event: attempted to change another user's feature flags.
+    Sentry.logger.warn("Forbidden feature flag update", {
+      action: "update", resource: "feature_flag", userId: handle,
+      owner: handle, outcome: "forbidden",
+    });
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   try {
     const { flag, enabled } = await req.json() as { flag?: unknown; enabled?: unknown };
@@ -69,6 +77,12 @@ export async function PATCH(
     const featureFlags: FeatureFlags = { ...current, [flag]: enabled };
 
     await db("users").where({ id: handle }).update({ feature_flags: featureFlags });
+
+    // Audit event: who changed which flag, to what value, and when.
+    Sentry.logger.info("Feature flag updated", {
+      action: "update", resource: "feature_flag", userId: handle,
+      flag, enabled,
+    });
 
     return NextResponse.json({ featureFlags });
   } catch (err) {

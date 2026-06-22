@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 
@@ -37,12 +38,24 @@ export async function PATCH(
     const { id } = await params;
     const comment = await db("comments").where({ id }).first();
     if (!comment) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (comment.user_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (comment.user_id !== userId) {
+      // Permission event: a non-owner attempted to edit this comment.
+      Sentry.logger.warn("Forbidden comment update", {
+        action: "update", resource: "comment", commentId: id,
+        owner: comment.user_id, outcome: "forbidden",
+      });
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const { body } = await req.json() as { body?: string };
     if (!body?.trim()) return NextResponse.json({ error: "body required" }, { status: 400 });
 
     await db("comments").where({ id }).update({ body: body.trim() });
+
+    // Audit event: who updated what, and when.
+    Sentry.logger.info("Comment updated", {
+      action: "update", resource: "comment", commentId: id,
+    });
     const updated = await db("comments")
       .join("users", "users.id", "comments.user_id")
       .where("comments.id", id)
@@ -98,9 +111,23 @@ export async function DELETE(
     const { id } = await params;
     const comment = await db("comments").where({ id }).first();
     if (!comment) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (comment.user_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (comment.user_id !== userId) {
+      // Permission event: a non-owner attempted to delete this comment.
+      Sentry.logger.warn("Forbidden comment delete", {
+        action: "delete", resource: "comment", commentId: id,
+        owner: comment.user_id, outcome: "forbidden",
+      });
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     await db("comments").where({ id }).delete();
+
+    // Audit event: who deleted what, and when.
+    Sentry.logger.info("Comment deleted", {
+      action: "delete", resource: "comment", commentId: id,
+      tickId: comment.tick_id,
+    });
+
     return new NextResponse(null, { status: 204 });
   } catch (err) {
     console.error(err);

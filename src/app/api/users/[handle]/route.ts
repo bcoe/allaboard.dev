@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 import { toUser } from "../route";
@@ -88,7 +89,14 @@ export async function PATCH(
     if (!userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
 
     const { handle } = await params;
-    if (userId !== handle) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (userId !== handle) {
+      // Permission event: attempted to edit another user's profile.
+      Sentry.logger.warn("Forbidden profile update", {
+        action: "update", resource: "user", userId: handle,
+        owner: handle, outcome: "forbidden",
+      });
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const { displayName, bio, homeBoard, homeBoardAngle, personalBests } =
       await req.json() as Record<string, unknown>;
@@ -108,6 +116,13 @@ export async function PATCH(
     }
 
     await db("users").where({ handle }).update(patch);
+
+    // Audit event: who updated their profile, which fields changed, and when.
+    Sentry.logger.info("Profile updated", {
+      action: "update", resource: "user", userId: handle,
+      fields: Object.keys(patch).join(","),
+    });
+
     const row = await db("users").where({ handle }).first();
     if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json({ ...toUser(row), apiToken: row.api_token });
