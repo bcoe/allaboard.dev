@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { v4 as uuidv4 } from "uuid";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
@@ -211,6 +212,18 @@ export async function POST(
     notSent: 0,
   };
 
+  // Log how many climb records we parsed out of the upload before we start
+  // importing. If imports fail with recordsFound=0, the problem is parsing the
+  // export file — not the climb/tick insertion that follows.
+  const recordsFound = body.entries.reduce(
+    (sum, entry) => sum + (Array.isArray(entry?.data?.Data) ? entry.data.Data.length : 0),
+    0,
+  );
+  Sentry.logger.info("Moonboard import parsed", {
+    sessionsReceived: body.entries.length,
+    recordsFound,
+  });
+
   for (const entry of body.entries) {
     const climbRecords = entry?.data?.Data;
     if (!Array.isArray(climbRecords)) continue;
@@ -320,5 +333,21 @@ export async function POST(
   }
 
   const skipped = Object.values(skipDetails).reduce((a, b) => a + b, 0);
+
+  // Log the outcome of each stage so a degenerate result is easy to diagnose:
+  // e.g. lots of skippedUnknownGrade points at the Font→V-scale conversion,
+  // while lots of skippedNotSent just means the export was mostly projects.
+  Sentry.logger.info("Moonboard import complete", {
+    recordsFound,
+    imported,
+    climbsCreated,
+    boardsCreated,
+    skipped,
+    skippedNotSent: skipDetails.notSent,
+    skippedUnknownGrade: skipDetails.unknownGrade,
+    skippedMissingName: skipDetails.missingName,
+    skippedAlreadyImported: skipDetails.alreadyImported,
+  });
+
   return NextResponse.json({ imported, climbsCreated, boardsCreated, skipped, skipDetails }, { status: 200 });
 }
