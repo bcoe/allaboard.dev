@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
+import * as Sentry from "@sentry/nextjs";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 import { recalculateBoardDifficulty } from "@/lib/server/boardDifficulty";
 
@@ -39,6 +40,16 @@ export async function POST(_req: NextRequest) {
     }
 
     const result = await recalculateBoardDifficulty();
+
+    // Audit this admin-triggered recompute and summarize its effect: board
+    // difficulty scores feed grade/stat calculations site-wide, so it matters
+    // who ran it and how many boards' scores actually changed.
+    Sentry.logger.info("Board difficulty recalculated", {
+      "admin.action": "recalculate_board_difficulty",
+      "admin.actor": session.userId,
+      "difficulty.boards_scored": Object.keys(result.boardScores).length,
+    });
+
     return NextResponse.json(result);
   } catch (err) {
     console.error("[recalculate-board-difficulty]", err);

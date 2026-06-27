@@ -9,6 +9,10 @@ Sentry.init({
   // Tracing — capture all traces in dev, sample in production
   tracesSampleRate: isDev ? 1.0 : 0.2,
 
+  // Structured logging via Sentry.logger.* — disabled by default, so every
+  // logger call is a silent no-op until this is set in all three runtimes.
+  enableLogs: true,
+
   integrations: [
     Sentry.browserTracingIntegration(),
   ],

@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 import { fontToVGrade } from "@/lib/fontToVGrade";
@@ -211,6 +212,24 @@ export async function POST(
     notSent: 0,
   };
 
+  // Moonboard nests climb records inside per-session entries; count the flat
+  // total so the start/finish numbers are comparable.
+  const recordsReceived = body.entries.reduce(
+    (sum, entry) => sum + (Array.isArray(entry?.data?.Data) ? entry.data.Data!.length : 0),
+    0,
+  );
+
+  // Attribute everything logged during this request to the importing user
+  // (opaque handle, never email) so the import can be traced end-to-end.
+  Sentry.setUser({ id: userId });
+  Sentry.logger.info("Moonboard import started", {
+    "import.source": "moonboard",
+    "import.entries_received": recordsReceived,
+    // Only attach the override when the client actually supplied one — omit
+    // optional attributes rather than logging empty placeholders.
+    ...(boardNameOverride ? { "import.board_name_override": boardNameOverride } : {}),
+  });
+
   for (const entry of body.entries) {
     const climbRecords = entry?.data?.Data;
     if (!Array.isArray(climbRecords)) continue;
@@ -320,5 +339,22 @@ export async function POST(
   }
 
   const skipped = Object.values(skipDetails).reduce((a, b) => a + b, 0);
+
+  // Summarize the outcome so it's clear, after the fact, how many records were
+  // imported vs. skipped and why. `not_sent` is expected (projects are dropped
+  // by design); a spike in `unknown_grade` instead points at a grade-parsing gap.
+  Sentry.logger.info("Moonboard import finished", {
+    "import.source": "moonboard",
+    "import.entries_received": recordsReceived,
+    "import.imported": imported,
+    "import.climbs_created": climbsCreated,
+    "import.boards_created": boardsCreated,
+    "import.skipped": skipped,
+    "import.skipped.missing_name": skipDetails.missingName,
+    "import.skipped.unknown_grade": skipDetails.unknownGrade,
+    "import.skipped.already_imported": skipDetails.alreadyImported,
+    "import.skipped.not_sent": skipDetails.notSent,
+  });
+
   return NextResponse.json({ imported, climbsCreated, boardsCreated, skipped, skipDetails }, { status: 200 });
 }

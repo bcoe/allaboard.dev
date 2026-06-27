@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { resolveUserId } from "@/lib/server/resolveUserId";
 import { fontToVGrade } from "@/lib/fontToVGrade";
@@ -105,6 +106,14 @@ export async function POST(
     alreadyImported: 0,
   };
 
+  // Attribute everything logged during this request to the importing user
+  // (opaque handle, never email) so the import can be traced end-to-end.
+  Sentry.setUser({ id: userId });
+  Sentry.logger.info("Aurora import started", {
+    "import.source": "aurora",
+    "import.entries_received": body.ascents.length,
+  });
+
   for (const ascent of body.ascents) {
     const climbName = ascent.climb?.trim();
     if (!climbName) { skipDetails.missingName++; continue; }
@@ -177,5 +186,21 @@ export async function POST(
   }
 
   const skipped = Object.values(skipDetails).reduce((a, b) => a + b, 0);
+
+  // Summarize the outcome so it's clear, after the fact, how many entries were
+  // imported vs. skipped and why — the per-reason breakdown is the difference
+  // between "the import worked" and "we silently dropped half the user's data".
+  Sentry.logger.info("Aurora import finished", {
+    "import.source": "aurora",
+    "import.entries_received": body.ascents.length,
+    "import.imported": imported,
+    "import.climbs_created": climbsCreated,
+    "import.skipped": skipped,
+    "import.skipped.missing_name": skipDetails.missingName,
+    "import.skipped.unknown_grade": skipDetails.unknownGrade,
+    "import.skipped.invalid_angle": skipDetails.invalidAngle,
+    "import.skipped.already_imported": skipDetails.alreadyImported,
+  });
+
   return NextResponse.json({ imported, climbsCreated, skipped, skipDetails }, { status: 200 });
 }

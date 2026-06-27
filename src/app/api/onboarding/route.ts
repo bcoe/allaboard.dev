@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 
@@ -74,6 +75,15 @@ export async function POST(req: NextRequest) {
   // Promote the session to a fully authenticated state
   session.userId = handle;
   await session.save();
+
+  // Audit the account creation — this is the one moment a user row comes into
+  // existence, and it answers "when did this account sign up, and which board
+  // did they start on?". Identify by opaque handle, never email.
+  Sentry.setUser({ id: handle });
+  Sentry.logger.info("User onboarded", {
+    "user.id": handle,
+    "user.home_board": board.name,
+  });
 
   return NextResponse.json({ ok: true });
 }

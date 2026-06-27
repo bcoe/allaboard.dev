@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { sessionOptions, type SessionData } from "@/lib/server/session";
 
@@ -28,7 +29,15 @@ export async function GET(req: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    console.error("Token exchange failed:", await tokenRes.text());
+    // Google rejected the code exchange. The user is redirected gracefully (no
+    // exception thrown), so this never surfaces as a Sentry error — log it as a
+    // warning with the upstream status so a spike in OAuth failures is visible.
+    // Log the status only, not the response body, which can carry token details.
+    Sentry.logger.warn("Google OAuth token exchange failed", {
+      "auth.provider": "google",
+      "auth.stage": "token_exchange",
+      "auth.response_status": tokenRes.status,
+    });
     return NextResponse.redirect(`${origin}/?auth_error=token_exchange`);
   }
 
@@ -44,6 +53,11 @@ export async function GET(req: NextRequest) {
   });
 
   if (!profileRes.ok) {
+    Sentry.logger.warn("Google OAuth profile fetch failed", {
+      "auth.provider": "google",
+      "auth.stage": "profile_fetch",
+      "auth.response_status": profileRes.status,
+    });
     return NextResponse.redirect(`${origin}/?auth_error=profile_fetch`);
   }
 
@@ -59,6 +73,7 @@ export async function GET(req: NextRequest) {
   let oauthAccount = await db("oauth_accounts")
     .where({ provider: "google", provider_user_id: sub })
     .first();
+  const isNewOauthAccount = !oauthAccount;
 
   if (!oauthAccount) {
     [oauthAccount] = await db("oauth_accounts")
@@ -97,6 +112,19 @@ export async function GET(req: NextRequest) {
   session.oauthAccountId = oauthAccount.id;
   session.userId         = oauthAccount.user_id ?? undefined;
   await session.save();
+
+  // Audit the successful sign-in. The routing decision (home vs. onboarding) is
+  // the key runtime branch here, so it's logged alongside whether this is a
+  // brand-new Google account. Identify by opaque handle / account id — never
+  // the email address, which is PII.
+  const onboardingRequired = !oauthAccount.user_id;
+  Sentry.setUser({ id: oauthAccount.user_id ?? oauthAccount.id });
+  Sentry.logger.info("User signed in", {
+    "auth.provider": "google",
+    "auth.new_account": isNewOauthAccount,
+    "auth.onboarding_required": onboardingRequired,
+    "routing.decision": onboardingRequired ? "onboarding" : "home",
+  });
 
   // Clear the CSRF state cookie and redirect
   const destination = oauthAccount.user_id ? "/" : "/onboarding";
