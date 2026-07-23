@@ -80,6 +80,9 @@ Existing triggers:
 |---|---|---|
 | `follows_count_sync` | `follows` | `users.followers_count`, `users.following_count` |
 | `ticks_climb_stats_sync` | `ticks` | `climbs.sends`, `climbs.star_rating` |
+| `tick_sessions_sync` | `ticks` | entire `tick_sessions` table (rebuilds affected user's sessions) |
+
+> `tick_sessions_sync` is scoped to `UPDATE OF date, user_id, sent, duration_minutes` (plus all INSERT/DELETE) so rating/comment-only edits don't rebuild, and it only ever writes `tick_sessions` (never `ticks`), so it can't recurse or disturb `ticks_climb_stats_sync`.
 
 ---
 
@@ -116,6 +119,9 @@ Migration files go in `api/migrations/` and are named `YYYYMMDDHHMMSS_descriptio
 8. `20260328000003_create_auth_sessions` — DB sessions table (kept for schema completeness; not used — iron-session stores session in cookie)
 9. `20260328000004_add_picture_to_oauth_accounts` — adds `profile_picture_url` to oauth_accounts (available before users row exists)
 10. `20260328000005_create_boards` — boards table; seeded with Kilter Board (Original), Moonboard 2016, Tension Board 1 (TB1)
+11. `20260722000001_add_duration_to_ticks` — adds `duration_minutes` (nullable) to ticks
+12. `20260722000002_create_tick_sessions` — tick_sessions table (denormalized climbing sessions)
+13. `20260722000003_tick_sessions_trigger` — `grade_rank()`, `recompute_tick_sessions()`, `tick_sessions_sync` trigger, and backfill of existing sessions
 
 ---
 
@@ -193,6 +199,25 @@ Migration files go in `api/migrations/` and are named `YYYYMMDDHHMMSS_descriptio
 | attempts | integer | |
 | sent | boolean | |
 | notes | text | |
+
+### `tick_sessions`
+Denormalized climbing sessions, derived entirely from `ticks` and maintained by the `tick_sessions_sync` trigger (never written by application code). A session is a user's ticks logged within 6 hours of each other (consecutive-gap grouping).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text | primary key; deterministic slug `<handle>-YYYY-MM-DD-<n>` (stable permalink) |
+| user_id | text | FK → users.id (CASCADE) |
+| date | date | calendar day of the first tick |
+| session_number | integer | 1-based ordinal within `date` (2nd+ session that day → title suffix "Session 2", …) |
+| started_at | timestamp | first tick timestamp (defines the membership window) |
+| ended_at | timestamp | last tick timestamp |
+| tick_count | integer | |
+| sent_count | integer | |
+| hardest_grade | text | hardest *sent* grade (via `grade_rank`); null if nothing sent |
+| total_minutes | integer | sum of recorded `duration_minutes`; null if none recorded |
+| created_at | timestamp | |
+
+Session membership is defined by the `[started_at, ended_at]` window (no FK on `ticks`), so the detail view reads live tick data. `grade_rank(text)` is an immutable SQL helper ordering the V-scale (incl. `V5+`/`V8+`).
 
 ---
 
@@ -307,6 +332,9 @@ A climb is the core content unit of allaboard. Climbs are browsable by everyone;
 | comment | text | nullable; free-form send notes |
 | instagram_url | text | nullable; instagram video of the send |
 | sent | boolean | true = completed, false = attempted only |
+| attempts | integer | nullable; null = "a bunch" |
+| duration_minutes | integer | nullable; minutes spent working the climb this session; null = no time recorded |
+| date | timestamp | when the tick happened |
 | created_at | timestamp | |
 
 **Unique constraint on `ticks`:** `(climb_id, user_id)` — one tick per user per climb.
@@ -412,6 +440,8 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | GET | `/api/feed?userId=` | `src/app/api/feed/route.ts` |
 | GET | `/api/stats/:userId` | `src/app/api/stats/[userId]/route.ts` |
 | DELETE | `/api/ticks/:id` | `src/app/api/ticks/[id]/route.ts` |
+| GET | `/api/tick-sessions?userId=` | `src/app/api/tick-sessions/route.ts` |
+| GET | `/api/tick-sessions/:id` | `src/app/api/tick-sessions/[id]/route.ts` |
 | GET | `/api/auth/me` | `src/app/api/auth/me/route.ts` |
 | POST | `/api/auth/logout` | `src/app/api/auth/logout/route.ts` |
 | GET | `/api/auth/google` | `src/app/api/auth/google/route.ts` |
@@ -433,6 +463,8 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | `/profile` | `src/app/profile/page.tsx` | Current user profile |
 | `/stats` | `src/app/stats/page.tsx` | Stats dashboard |
 | `/onboarding` | `src/app/onboarding/page.tsx` | First-time setup after Google OAuth (display name, home board, max grade) |
+| `/user/[handle]/sessions` | `src/app/user/[handle]/sessions/page.tsx` | List of a user's climbing sessions ("My Sessions") |
+| `/user/[handle]/sessions/[id]` | `src/app/user/[handle]/sessions/[id]/page.tsx` | Session detail + permalink (stats, copy summary, climb cards) |
 
 ---
 

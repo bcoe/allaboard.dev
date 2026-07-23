@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
       .orderBy("t.created_at", "desc")
       .select(
         "t.id", "t.date", "t.sent", "t.rating", "t.comment",
-        "t.suggested_grade", "t.instagram_url", "t.attempts", "t.created_at",
+        "t.suggested_grade", "t.instagram_url", "t.attempts", "t.duration_minutes", "t.created_at",
         "c.id as climb_id", "c.name as climb_name", "c.grade",
         "c.angle", "b.name as board_name",
       );
@@ -61,6 +61,7 @@ export async function GET(req: NextRequest) {
       suggestedGrade: r.suggested_grade ?? undefined,
       instagramUrl:   r.instagram_url ?? undefined,
       attempts:       r.attempts ?? undefined,
+      durationMinutes: r.duration_minutes ?? undefined,
       createdAt:      r.created_at,
     })));
   } catch (err) {

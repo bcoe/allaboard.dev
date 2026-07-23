@@ -10,6 +10,7 @@ interface TickModalInitialData {
   date?: string;
   sent?: boolean;
   attempts?: number;
+  durationMinutes?: number;
   rating?: number;
   suggestedGrade?: Grade;
   comment?: string;
@@ -31,6 +32,7 @@ export default function TickModal({ climbId, climbName, onClose, onSuccess, init
   const [date, setDate]                   = useState(initialData?.date ? initialData.date.slice(0, 10) : today);
   const [sent, setSent]                   = useState(initialData?.sent ?? true);
   const [attempts, setAttempts]           = useState(initialData?.attempts != null ? String(initialData.attempts) : "");
+  const [durationMinutes, setDurationMinutes] = useState(initialData?.durationMinutes != null ? String(initialData.durationMinutes) : "");
   const [rating, setRating]               = useState(initialData?.rating ?? 0);
   const [suggestedGrade, setSuggestedGrade] = useState<Grade | "">(initialData?.suggestedGrade ?? "");
   const [comment, setComment]             = useState(initialData?.comment ?? "");
@@ -48,6 +50,7 @@ export default function TickModal({ climbId, climbName, onClose, onSuccess, init
       date,
       sent,
       attempts: attempts ? Number(attempts) : undefined,
+      durationMinutes: durationMinutes ? Number(durationMinutes) : undefined,
       suggestedGrade: suggestedGrade || undefined,
       rating,
       comment: comment.trim() || undefined,
@@ -152,6 +155,21 @@ export default function TickModal({ climbId, climbName, onClose, onSuccess, init
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Time spent working the climb */}
+          <div>
+            <label className="block text-xs font-medium text-stone-400 mb-1">
+              Time spent <span className="text-stone-600 font-normal">(minutes, optional)</span>
+            </label>
+            <input
+              type="number"
+              min={1}
+              value={durationMinutes}
+              onChange={(e) => setDurationMinutes(e.target.value)}
+              placeholder="e.g. 30"
+              className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-white text-sm placeholder:text-stone-600 focus:outline-none focus:border-orange-500 transition-colors"
+            />
           </div>
 
           {/* Star rating */}
