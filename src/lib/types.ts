@@ -30,6 +30,7 @@ export interface Tick {
   instagramUrl?: string;
   sent: boolean;
   attempts?: number;   // null/undefined = "a bunch"
+  durationMinutes?: number; // minutes spent working the climb; undefined = no time recorded
   date: string;        // date the tick happened (YYYY-MM-DD)
   createdAt: string;
 }
@@ -47,6 +48,7 @@ export interface ClimbTick {
   instagramUrl?: string;
   sent: boolean;
   attempts?: number;
+  durationMinutes?: number;
   commentsCount: number;
   date: string;
   createdAt: string;
@@ -65,8 +67,29 @@ export interface UserTick {
   instagramUrl?: string;
   sent: boolean;
   attempts?: number;
+  durationMinutes?: number;
   date: string;
   createdAt: string;
+}
+
+/** A climbing session — a denormalized grouping of a user's ticks logged
+ *  within 6 hours of each other. Maintained by a DB trigger on `ticks`. */
+export interface TickSessionSummary {
+  id: string;              // deterministic slug: <handle>-YYYY-MM-DD-<n>
+  userId: string;
+  date: string;            // calendar day of the first tick (YYYY-MM-DD)
+  sessionNumber: number;   // 1-based ordinal within `date`
+  startedAt: string;
+  endedAt: string;
+  tickCount: number;
+  sentCount: number;
+  hardestGrade?: Grade;    // hardest *sent* grade; undefined if nothing sent
+  totalMinutes?: number;   // sum of recorded working times; undefined if none recorded
+}
+
+/** A session plus the climbs (live ticks) logged during it. */
+export interface TickSessionDetail extends TickSessionSummary {
+  ticks: UserTick[];
 }
 
 export interface Climb {

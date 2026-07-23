@@ -20,6 +20,7 @@ import { resolveUserId } from "@/lib/server/resolveUserId";
  *   - `date` — ISO date string (`"YYYY-MM-DD"`).
  *   - `sent` — whether the climb was completed.
  *   - `attempts` — number of attempts.
+ *   - `durationMinutes` — minutes spent working the climb this session.
  *   - `suggestedGrade` — grade opinion (`"V0"`–`"V18"`).
  *   - `rating` — star rating 1–4.
  *   - `comment` — free-form notes.
@@ -61,11 +62,12 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { date, sent, attempts, suggestedGrade, rating, comment, instagramUrl } =
+    const { date, sent, attempts, durationMinutes, suggestedGrade, rating, comment, instagramUrl } =
       await req.json() as {
         date?: string;
         sent?: boolean;
         attempts?: number;
+        durationMinutes?: number;
         suggestedGrade?: string;
         rating?: number;
         comment?: string;
@@ -87,6 +89,7 @@ export async function PATCH(
     if (tickTimestamp !== undefined) patch.date            = tickTimestamp;
     if (sent      !== undefined)      patch.sent           = sent;
     if (attempts  !== undefined)      patch.attempts       = attempts ?? null;
+    if (durationMinutes !== undefined) patch.duration_minutes = durationMinutes ?? null;
     if (rating    !== undefined)      patch.rating         = rating;
     if (suggestedGrade !== undefined) patch.suggested_grade = suggestedGrade || null;
     if (comment   !== undefined)      patch.comment        = comment?.trim() || null;

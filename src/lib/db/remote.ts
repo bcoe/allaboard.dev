@@ -3,7 +3,7 @@
  * Credentials are included on every request so the auth session cookie is sent.
  */
 
-import { Board, Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity, Comment, InboxItem } from "@/lib/types";
+import { Board, Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity, Comment, InboxItem, TickSessionSummary, TickSessionDetail } from "@/lib/types";
 import type { FeatureFlags } from "@/lib/featureFlags";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -79,7 +79,7 @@ export async function updateClimb(
 
 export async function tickClimb(
   climbId: string,
-  data: { date: string; sent: boolean; attempts?: number; suggestedGrade?: string; rating: number; comment?: string; instagramUrl?: string },
+  data: { date: string; sent: boolean; attempts?: number; durationMinutes?: number; suggestedGrade?: string; rating: number; comment?: string; instagramUrl?: string },
 ): Promise<Tick> {
   return api<Tick>(`/climbs/${climbId}/ticks`, { method: "POST", body: JSON.stringify(data) });
 }
@@ -90,7 +90,7 @@ export async function getUserTicks(userId: string): Promise<UserTick[]> {
 
 export async function updateTick(
   tickId: string,
-  data: { date: string; sent: boolean; attempts?: number; suggestedGrade?: string; rating: number; comment?: string; instagramUrl?: string },
+  data: { date: string; sent: boolean; attempts?: number; durationMinutes?: number; suggestedGrade?: string; rating: number; comment?: string; instagramUrl?: string },
 ): Promise<void> {
   await api<void>(`/ticks/${encodeURIComponent(tickId)}`, { method: "PATCH", body: JSON.stringify(data) });
 }
@@ -101,6 +101,22 @@ export async function deleteTick(tickId: string): Promise<void> {
 
 export async function getClimbTicks(climbId: string): Promise<ClimbTick[]> {
   return api<ClimbTick[]>(`/climbs/${climbId}/ticks`);
+}
+
+// ─── Sessions (derived from ticks) ──────────────────────────────────────────
+
+/** List a user's climbing sessions, most recent first. */
+export async function getUserSessions(userId: string): Promise<TickSessionSummary[]> {
+  return api<TickSessionSummary[]>(`/tick-sessions?userId=${encodeURIComponent(userId)}`);
+}
+
+/** Fetch a single session (with its climbs) by permalink slug. */
+export async function getSession(id: string): Promise<TickSessionDetail | undefined> {
+  try {
+    return await api<TickSessionDetail>(`/tick-sessions/${encodeURIComponent(id)}`);
+  } catch {
+    return undefined;
+  }
 }
 
 

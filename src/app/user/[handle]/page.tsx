@@ -365,6 +365,22 @@ export default function UserProfilePage() {
           </Link>
       </section>
 
+      {/* My Sessions link — visible to everyone */}
+      <section className="mt-4">
+          <Link
+            href={`/user/${profileUser.handle}/sessions`}
+            className="flex items-center justify-between bg-stone-800 border border-stone-700 hover:border-stone-500 rounded-xl px-5 py-4 transition-colors"
+          >
+            <div>
+              <div className="text-white font-semibold">My Sessions</div>
+              <div className="text-stone-400 text-sm mt-0.5">
+                Summarizes recent workouts.
+              </div>
+            </div>
+            <span className="text-stone-400 text-lg">→</span>
+          </Link>
+      </section>
+
       {/* Tab nav */}
       <div className="mt-8 flex gap-1 border-b border-stone-800">
         {(["ticks", "followers", "following"] as SocialTab[]).map((tab) => (

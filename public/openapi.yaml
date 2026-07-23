@@ -322,6 +322,9 @@ paths:
                 attempts:
                   type: string
                   description: number of attempts.
+                durationMinutes:
+                  type: string
+                  description: minutes spent working the climb this session.
                 suggestedGrade:
                   type: string
                   description: the climber's grade opinion ("V0"–"V18").
@@ -758,6 +761,39 @@ paths:
           description: A ClimberStats object.
         "500":
           description: database error.
+  /api/tick-sessions/{id}:
+    get:
+      summary: Fetch a single climbing session and the climbs logged during it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The session summary plus a ticks array (each embedding climb name, grade, board name, angle, and the tick's own detail).
+        "404":
+          description: the session does not exist.
+        "500":
+          description: database error.
+  /api/tick-sessions:
+    get:
+      summary: List all climbing sessions for a user, most recent first.
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          description: the user handle to fetch sessions for.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of session summary objects (date, session number, tick and send counts, hardest sent grade, total recorded working minutes).
+        "400":
+          description: userId is not provided.
+        "500":
+          description: database error.
   /api/ticks/{id}:
     patch:
       summary: Update an existing tick.
@@ -796,6 +832,9 @@ paths:
                 attempts:
                   type: string
                   description: number of attempts.
+                durationMinutes:
+                  type: string
+                  description: minutes spent working the climb this session.
                 suggestedGrade:
                   type: string
                   description: grade opinion ("V0"–"V18").

@@ -50,6 +50,51 @@ export function gradePoints(grade: string): { base: number; flash: number } {
   return { base, flash };
 }
 
+/** Ordinal suffix for a day of the month (1 → "st", 2 → "nd", 11 → "th", …). */
+function ordinal(day: number): string {
+  const rem100 = day % 100;
+  if (rem100 >= 11 && rem100 <= 13) return "th";
+  switch (day % 10) {
+    case 1: return "st";
+    case 2: return "nd";
+    case 3: return "rd";
+    default: return "th";
+  }
+}
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * Formats a date string as `"October 5th 2026"`. Accepts either a
+ * `"YYYY-MM-DD"` date or a full ISO timestamp; the calendar day is read from
+ * the leading date part so it is not shifted by the viewer's timezone.
+ */
+export function formatSessionDate(dateStr: string): string {
+  const [y, m, d] = dateStr.slice(0, 10).split("-").map(Number);
+  return `${MONTHS[m - 1]} ${d}${ordinal(d)} ${y}`;
+}
+
+/**
+ * Full title for a climbing session, e.g. `"Session October 5th 2026"`, with
+ * a `" Session N"` suffix for the 2nd and later sessions on the same day.
+ */
+export function sessionTitle(dateStr: string, sessionNumber: number): string {
+  const base = `Session ${formatSessionDate(dateStr)}`;
+  return sessionNumber > 1 ? `${base} Session ${sessionNumber}` : base;
+}
+
+/** Formats a minute count as `"1h 30m"` / `"45m"` / `"2h"`. */
+export function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
 export function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const minutes = Math.floor(diff / 60000);

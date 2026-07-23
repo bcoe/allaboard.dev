@@ -38,7 +38,7 @@ export async function GET(
       .select(
         "ticks.id", "ticks.date", "ticks.sent", "ticks.rating",
         "ticks.comment", "ticks.suggested_grade", "ticks.instagram_url",
-        "ticks.attempts", "ticks.comments_count", "ticks.created_at",
+        "ticks.attempts", "ticks.duration_minutes", "ticks.comments_count", "ticks.created_at",
         "users.handle", "users.display_name", "users.avatar_color",
         "users.profile_picture_url",
       );
@@ -55,6 +55,7 @@ export async function GET(
       suggestedGrade:       r.suggested_grade ?? undefined,
       instagramUrl:         r.instagram_url ?? undefined,
       attempts:             r.attempts ?? undefined,
+      durationMinutes:      r.duration_minutes ?? undefined,
       commentsCount:        r.comments_count,
       createdAt:            r.created_at,
     })));
@@ -75,6 +76,7 @@ export async function GET(
  *   - `date` *(optional)* — ISO date string (`"YYYY-MM-DD"`); defaults to today.
  *   - `sent` *(optional, default true)* — whether the climb was completed.
  *   - `attempts` *(optional)* — number of attempts.
+ *   - `durationMinutes` *(optional)* — minutes spent working the climb this session.
  *   - `suggestedGrade` *(optional)* — the climber's grade opinion (`"V0"`–`"V18"`).
  *   - `comment` *(optional)* — free-form send notes.
  *   - `instagramUrl` *(optional)* — URL to an Instagram post/reel of the send.
@@ -103,11 +105,12 @@ export async function POST(
     const climb = await db("climbs").where({ id }).first();
     if (!climb) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const { date, sent, attempts, suggestedGrade, rating, comment, instagramUrl } =
+    const { date, sent, attempts, durationMinutes, suggestedGrade, rating, comment, instagramUrl } =
       await req.json() as {
         date?: string;
         sent?: boolean;
         attempts?: number;
+        durationMinutes?: number;
         suggestedGrade?: string;
         rating: number;
         comment?: string;
@@ -142,6 +145,7 @@ export async function POST(
       comment:         comment?.trim() || null,
       instagram_url:   resolvedUrl,
       attempts:        attempts ?? null,
+      duration_minutes: durationMinutes ?? null,
       sent:            sent ?? true,
       created_at:      now,
       updated_at:      now,
@@ -172,6 +176,7 @@ function toTick(row: Record<string, unknown>) {
     comment:        row.comment ?? undefined,
     instagramUrl:   row.instagram_url ?? undefined,
     attempts:       row.attempts ?? undefined,
+    durationMinutes: row.duration_minutes ?? undefined,
     sent:           row.sent,
     createdAt:      row.created_at,
   };
