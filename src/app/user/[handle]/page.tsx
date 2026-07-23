@@ -374,7 +374,7 @@ export default function UserProfilePage() {
             <div>
               <div className="text-white font-semibold">My Sessions</div>
               <div className="text-stone-400 text-sm mt-0.5">
-                Summarizing my climbing workouts
+                Summarizes recent workouts.
               </div>
             </div>
             <span className="text-stone-400 text-lg">→</span>
