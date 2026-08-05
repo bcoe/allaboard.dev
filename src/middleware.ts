@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { setVercelRequestIdFromHeaders } from "@/lib/server/vercel-request-id";
+import { setVercelTraceContext } from "@/lib/server/vercel-trace-context";
 
 // ── Rate limit configuration ──────────────────────────────────────────────────
 // Change these two values to adjust limits for all API routes.
@@ -125,6 +127,15 @@ function applyCORSHeaders(res: NextResponse, origin: string): void {
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // On Vercel, publish the invocation's request ID as the `vercel-request-id`
+  // attribute so middleware telemetry carries it too (the Node runtime picks it
+  // up on its own via the Sentry httpServerRequest hook).
+  setVercelRequestIdFromHeaders(req.headers);
+
+  // Same idea for the trace ID: adopt Vercel's trace on the isolation scope so
+  // errors and logs raised here report the trace Vercel shows for the request.
+  setVercelTraceContext();
 
   // ── Rate limiting (all routes) ──────────────────────────────────────────────
   const { key, limit } = getRateLimitKey(req);

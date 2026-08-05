@@ -1,4 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
+import { instrumentVercelRequestId } from "@/lib/server/vercel-request-id";
+import { instrumentVercelTraceContext } from "@/lib/server/vercel-trace-context";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -13,3 +15,12 @@ Sentry.init({
 
   debug: isDev,
 });
+
+// Registers the span hook for the edge runtime; the ID itself is read from the
+// request headers in `src/middleware.ts`.
+instrumentVercelRequestId();
+
+// Wraps the edge runtime's OTel propagator so spans continue Vercel's trace.
+// The edge SDK creates the middleware span before user code runs, so
+// `src/middleware.ts` also sets the trace on the isolation scope.
+instrumentVercelTraceContext();

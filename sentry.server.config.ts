@@ -1,4 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
+import { instrumentVercelRequestId } from "@/lib/server/vercel-request-id";
+import { instrumentVercelTraceContext } from "@/lib/server/vercel-trace-context";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -13,3 +15,12 @@ Sentry.init({
 
   debug: isDev,
 });
+
+// On Vercel: stamp `vercel-request-id` (from the x-vercel-id request header) on
+// spans, logs and metrics. No-op elsewhere.
+instrumentVercelRequestId();
+
+// On Vercel: continue Vercel's own trace (its infra root span context, read from
+// the request-context global) so Sentry traces share the Vercel trace ID.
+// Requests that arrive with their own trace keep it. No-op elsewhere.
+instrumentVercelTraceContext();

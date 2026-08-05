@@ -13,6 +13,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
     "@scalar/api-reference-react": "^0.9.18",
     "@sentry/nextjs": "^10.46.0",
     "canvas-confetti": "^1.9.4",
