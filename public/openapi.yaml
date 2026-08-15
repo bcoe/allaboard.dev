@@ -810,8 +810,6 @@ paths:
           description: "{ sessionId, status, url?, canRetry, attempts } — ready once the image is stored, pending if another request is already generating it, failed if this attempt (or the budget) ran out."
         "401":
           description: not authenticated.
-        "403":
-          description: the caller does not own the session.
         "404":
           description: the session does not exist.
         "422":

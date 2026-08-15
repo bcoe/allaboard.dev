@@ -4,10 +4,11 @@
  * Two model calls, in order:
  *
  *   1. A language model reads the session's climbs and notes and writes an
- *      art direction brief — one image prompt capturing the *mood* of the
- *      session. This step exists because raw climb names and notes make a poor
- *      image prompt on their own ("argh", "My god what a stupid climb"), and
- *      because it is where the notes-over-names weighting is enforced.
+ *      art direction brief — one image prompt weaving several specifics of
+ *      the session into a single scene. This step exists because raw climb
+ *      names and notes make a poor image prompt on their own ("argh", "My god
+ *      what a stupid climb"), and because it is where the notes-over-names
+ *      weighting and the three-details rule are enforced.
  *   2. An image model renders that prompt as a 1200x400 banner.
  *
  * Both calls go through the Vercel AI Gateway (`AI_GATEWAY_API_KEY`).
@@ -57,23 +58,26 @@ function forLog(prompt: string): string {
 /**
  * The art direction brief.
  *
- * The two constraints that matter most are encoded here rather than in the
- * image prompt, so they cannot be diluted by whatever the notes say: the notes
- * outrank the climb names, and nothing in the image may contain text.
+ * The constraints that matter most are encoded here rather than in the image
+ * prompt, so they cannot be diluted by whatever the notes say: the notes
+ * outrank the climb names, the banner must be recognisably *this* session
+ * rather than generic climbing art, and nothing in the image may contain text.
  */
 const ART_DIRECTION = `You are the art director for allaboard, a bouldering logbook. You write image-generation prompts for the header banner that sits at the top of a single climbing session.
 
-You will be given the climbs a climber logged in one session and, more importantly, the notes they wrote about each climb. Turn the FEELING of that session into one image prompt.
+You will be given the climbs a climber logged in one session and, more importantly, the notes they wrote about each climb. Turn that session into one image prompt.
 
 Rules:
+- Build the scene from at least THREE specific details of this session — an image or mood from a note, a motif suggested by a climb name, a grade fought for, an attempt count, the hours spent. More is better. They must resolve into ONE coherent moment, sharing a setting and a light source, never a collage of unrelated parts. The climber should recognise their own session in it.
 - The NOTES are the primary source. They carry the mood: the struggle, the triumph, the tedium, the absurdity. Climb names are secondary flavour — a name may suggest an object or motif, but never let a name override what the notes say. If the notes and the names disagree, follow the notes.
+- Setting: a real bouldering gym, plainly legible as one. Chalked plastic holds and volumes of distinct shapes bolted across an overhanging wall, crash mats, tape, brushes, high dim rafters. The holds must read unmistakably as holds.
+- Style: anime. Crisp cel-shaded linework and cinematic staging in the register of Ghost in the Shell, but a shade lighter and warmer than that — detailed and grounded, never chibi, never soft pastel fantasy.
 - The result is a 3:1 ultrawide banner sitting behind a page title: calm and uncluttered, generous negative space, the subject off to one side, nothing busy or high-contrast through the middle.
-- Palette: deep charcoal and warm stone browns with a single ember-orange accent light. Dim, moody, cinematic.
+- Palette: deep charcoal and warm stone browns with a single ember-orange accent light. Moody and cinematic, but not murky.
 - ABSOLUTELY NO text, letters, numbers, words, signage, logos, labels, or writing of any kind anywhere in the image. Never ask for any.
-- Aim for one quiet visual joke: deadpan, surreal, faintly absurd — the kind that earns a snort, not a laugh track. If the notes are euphoric, go gently mythic. If they read as suffering, go gently ridiculous. Never a cartoon, never a meme, never slapstick, never a caricature.
-- Photographic or painterly realism with fine film grain. Avoid the obvious stock-photo climber-on-a-wall shot unless the notes genuinely call for it.
+- Aim for one quiet visual joke: deadpan, surreal, faintly absurd — the kind that earns a snort, not a laugh track. If the notes are euphoric, go gently mythic. If they read as suffering, go gently ridiculous. Never a meme, never slapstick, never a caricature.
 
-Reply with ONLY the image prompt, one paragraph, under 90 words. No preamble, no quotation marks.`;
+Reply with ONLY the image prompt, one paragraph, under 120 words. No preamble, no quotation marks.`;
 
 /**
  * Renders the session as the plain text handed to the prompt model.

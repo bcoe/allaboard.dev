@@ -3,12 +3,14 @@
  *
  * ACL + contract tests for the session header-image endpoints:
  *   - GET  /api/tick-sessions/[id]/image      (public status probe)
- *   - POST /api/tick-sessions/[id]/image      (owner-only generation)
+ *   - POST /api/tick-sessions/[id]/image      (generation; any signed-in user)
  *   - GET  /api/tick-sessions/[id]/image/raw  (public bytes)
  *
- * Generation costs real inference, so two properties matter most here and are
- * pinned below: only the climber who logged the session can trigger it, and a
- * session that already has an image is never regenerated.
+ * Generation costs real inference, so what matters most here and is pinned
+ * below: it takes an account (never anonymous), a session that already has an
+ * image is never regenerated, and the retry budget can only be reset by the
+ * session's owner. Any signed-in climber may make a *missing* banner, for
+ * their own session or anyone else's.
  */
 
 import { NextRequest } from "next/server";
@@ -169,12 +171,27 @@ describe("POST /api/tick-sessions/[id]/image — access control", () => {
     expect(mockGenerate).not.toHaveBeenCalled();
   });
 
-  it("returns 403 for a user who does not own the session", async () => {
+  it("lets a signed-in visitor generate a banner for someone else's session", async () => {
     mockGetIronSession.mockResolvedValue(authSession("bob") as never);
-    mockDb.mockReturnValueOnce(b({ first: sessionRow })); // owned by alice
+    mockGenerate.mockResolvedValue(banner);
+
+    const store = b({ inserted: [{ session_id: SESSION_ID }] });
+    mockDb
+      .mockReturnValueOnce(b({ first: sessionRow })) // owned by alice
+      .mockReturnValueOnce(store)                    // claim insert
+      .mockReturnValueOnce(b({ rows: [tickRow] }))   // session ticks
+      .mockReturnValueOnce(store);                   // store result
+
     const res = await POST(req("POST"), params(SESSION_ID));
-    expect(res.status).toBe(403);
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+
+    // The row belongs to the session's climber, never the passer-by who paid
+    // for it: user_id is the FK that CASCADE-deletes the banner along with an
+    // account, so pointing it at bob would take alice's banner with him.
+    expect(store.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ session_id: SESSION_ID, user_id: "alice" }),
+    );
   });
 
   it("returns 404 when the session does not exist", async () => {
@@ -365,6 +382,34 @@ describe("POST /api/tick-sessions/[id]/image — retry after failure", () => {
       expect.objectContaining({ status: "pending", attempts: 1 }),
     );
     expect(mockGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores ?retry=1 from anyone but the owner", async () => {
+    mockGetIronSession.mockResolvedValue(authSession("bob") as never);
+    mockGenerate.mockResolvedValue(banner);
+
+    const store = b({ inserted: [], updated: [{ attempts: 4 }] });
+    mockDb
+      .mockReturnValueOnce(b({ first: sessionRow }))                        // owned by alice
+      .mockReturnValueOnce(store)                                           // claim insert loses
+      .mockReturnValueOnce(b({ first: { status: "failed", attempts: 3 } })) // budget spent
+      .mockReturnValueOnce(store)                                           // reclaim attempt
+      .mockReturnValueOnce(b({ rows: [tickRow] }))
+      .mockReturnValueOnce(store);
+
+    const forced = new NextRequest(
+      `http://localhost/api/tick-sessions/${SESSION_ID}/image?retry=1`,
+      { method: "POST" },
+    );
+    await POST(forced, params(SESSION_ID));
+
+    // Incremented, not reset to 1 — the flag was dropped. (Against real
+    // Postgres the `attempts < 3` predicate in that same UPDATE is what then
+    // matches nothing; the stub can't evaluate it, so what is pinned here is
+    // that a visitor never gets `force`.)
+    expect(store.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "pending", attempts: { __raw: "attempts + 1" } }),
+    );
   });
 
   it("reports a fresh failure as retryable so the next visit picks it up", async () => {

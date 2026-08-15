@@ -55,8 +55,12 @@ export default function SessionDetailPage() {
         Back to sessions
       </Link>
 
-      {/* AI banner — generated once, on the owner's first visit */}
-      <SessionHeaderImage sessionId={session.id} isOwner={user?.id === session.userId} />
+      {/* AI banner — generated once, on the first visit by any signed-in climber */}
+      <SessionHeaderImage
+        sessionId={session.id}
+        isOwner={user?.id === session.userId}
+        isLoggedIn={!!user}
+      />
 
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mt-4">

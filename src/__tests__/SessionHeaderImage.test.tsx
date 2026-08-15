@@ -144,6 +144,59 @@ describe("SessionHeaderImage", () => {
     expect(mockGenerate).not.toHaveBeenCalled();
   });
 
+  it("generates a missing banner for a signed-in visitor, not just the owner", async () => {
+    mockGet.mockResolvedValue(state("none"));
+    mockGenerate.mockResolvedValue(state("ready", RAW_URL));
+
+    render(<SessionHeaderImage sessionId={SESSION_ID} isOwner={false} isLoggedIn />);
+
+    await waitFor(() => expect(mockGenerate).toHaveBeenCalledTimes(1));
+    expect(mockGenerate).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("lets a signed-in visitor pick up a failed session that still has attempts", async () => {
+    mockGet.mockResolvedValue({ ...state("failed"), canRetry: true });
+    mockGenerate.mockResolvedValue(state("ready", RAW_URL));
+
+    const { container } = render(
+      <SessionHeaderImage sessionId={SESSION_ID} isOwner={false} isLoggedIn />,
+    );
+
+    await waitFor(() => expect(mockGenerate).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(container.querySelector("img")).not.toBeNull());
+  });
+
+  it("offers no manual retry to a visitor — only the owner can reset the budget", async () => {
+    mockGet.mockResolvedValue({ ...state("failed"), canRetry: false });
+
+    const { container } = render(
+      <SessionHeaderImage sessionId={SESSION_ID} isOwner={false} isLoggedIn />,
+    );
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("shows a signed-out visitor nothing while a banner is still waiting to be made", async () => {
+    mockGet.mockResolvedValue({ ...state("failed"), canRetry: true });
+
+    const { container } = render(<SessionHeaderImage sessionId={SESSION_ID} isOwner={false} />);
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("still shows a signed-out visitor the placeholder while someone else generates", async () => {
+    mockGet.mockResolvedValue(state("pending"));
+
+    render(<SessionHeaderImage sessionId={SESSION_ID} isOwner={false} />);
+
+    expect(await screen.findByText(PLACEHOLDER)).toBeInTheDocument();
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
   it("is decorative — empty alt, so screen readers skip it entirely", async () => {
     mockGet.mockResolvedValue(state("ready", RAW_URL));
 

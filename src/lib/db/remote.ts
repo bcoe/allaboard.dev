@@ -127,11 +127,13 @@ export async function getSessionImage(id: string): Promise<SessionImage> {
 /**
  * Ask the server to generate this session's header banner.
  *
- * Owner-only, and a no-op if one already exists. The request is held for the
- * whole pipeline (~20–30s), so callers should show a placeholder meanwhile.
+ * Any signed-in climber may do this for any session, and it is a no-op if one
+ * already exists. The request is held for the whole pipeline (~20–30s), so
+ * callers should show a placeholder meanwhile.
  *
  * Pass `force` when the climber is explicitly retrying a session that has
- * already spent its automatic retry budget.
+ * already spent its automatic retry budget — the server honours it for the
+ * session's owner only.
  */
 export async function generateSessionImage(id: string, force = false): Promise<SessionImage> {
   const qs = force ? "?retry=1" : "";

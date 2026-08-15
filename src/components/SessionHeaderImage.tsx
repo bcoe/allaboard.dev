@@ -7,15 +7,17 @@
  *
  *   - `ready`   → show the image (fades in once decoded).
  *   - `pending` → another tab or request is generating; poll until it settles.
- *   - `none`    → if the viewer owns the session, ask the server to generate
- *                 one; otherwise render nothing. Generation costs real
- *                 inference, so only the climber whose session it is triggers
- *                 it — visitors see the banner only once it exists.
+ *   - `none`    → if the viewer is signed in, ask the server to generate one —
+ *                 their own session or anyone else's. A session earns its
+ *                 banner on whichever visit gets there first. Signed-out
+ *                 visitors render nothing: generation costs real inference and
+ *                 wants an account behind it.
  *   - `failed`  → retry automatically while the server says `canRetry`. Image
  *                 generation fails transiently, and the fix for that is
  *                 another attempt on the next visit rather than a session
  *                 that is permanently blank. Once the budget is spent, the
- *                 owner gets a quiet "try again"; visitors see nothing.
+ *                 owner gets a quiet "try again" — only they can reset it,
+ *                 so only they are offered it; everyone else sees nothing.
  *
  * A *successful* banner is never regenerated, so the placeholder is shown at
  * most once per session in the happy path.
@@ -33,10 +35,18 @@ const MAX_POLLS = 30;
 export default function SessionHeaderImage({
   sessionId,
   isOwner,
+  isLoggedIn = false,
 }: {
   sessionId: string;
+  /** Viewer is the climber whose session this is — gates the manual retry. */
   isOwner: boolean;
+  /** Viewer is signed in at all — gates triggering generation. */
+  isLoggedIn?: boolean;
 }) {
+  // An owner is by definition signed in; spelling it out keeps the two props
+  // independent for callers that only know one of them.
+  const canGenerate = isOwner || isLoggedIn;
+
   const [image, setImage] = useState<SessionImage | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -59,7 +69,7 @@ export default function SessionHeaderImage({
       const shouldGenerate =
         state.status === "none" || (state.status === "failed" && state.canRetry);
 
-      if (shouldGenerate && isOwner && !requested.current) {
+      if (shouldGenerate && canGenerate && !requested.current) {
         requested.current = true;
         // Held open for the whole pipeline (~30s); the placeholder covers it.
         const done = await generateSessionImage(sessionId).catch(
@@ -83,7 +93,7 @@ export default function SessionHeaderImage({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [sessionId, isOwner]);
+  }, [sessionId, canGenerate]);
 
   /** Explicit retry after the automatic budget ran out — resets it server-side. */
   const retry = useCallback(async () => {
@@ -97,13 +107,19 @@ export default function SessionHeaderImage({
 
   if (!image) return null;
 
-  // Out of automatic retries. The owner gets a way back; a visitor gets the
-  // page exactly as it was before, with no broken-looking gap.
+  // Out of automatic retries. The owner gets a way back — they're the only one
+  // the server lets reset the budget; everyone else gets the page exactly as it
+  // was before, with no broken-looking gap.
   if (image.status === "failed" && !image.canRetry && !retrying) {
     return isOwner ? <BannerFailed onRetry={retry} /> : null;
   }
 
-  if (image.status === "none" && !isOwner) return null;
+  // Nothing to show and no one here to make it: render nothing rather than an
+  // empty 400px frame waiting on a generation that isn't coming. (A `pending`
+  // session still shows the placeholder — someone else's image is on its way.)
+  const awaitingGeneration =
+    image.status === "none" || (image.status === "failed" && image.canRetry);
+  if (awaitingGeneration && !canGenerate) return null;
 
   const showImage = image.status === "ready" && image.url;
 

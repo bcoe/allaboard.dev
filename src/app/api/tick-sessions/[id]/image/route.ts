@@ -2,8 +2,9 @@
  * Session header image — status and generation.
  *
  * `GET` is the public status probe the session page polls; `POST` runs the
- * (slow, paid) generation and is restricted to the climber whose session it
- * is. The bytes themselves are served by the `raw` sub-route.
+ * (slow, paid) generation and is open to any signed-in climber, so a session
+ * gets its banner on whoever's visit happens to be first. The bytes themselves
+ * are served by the `raw` sub-route.
  *
  * @module api/tick-sessions/id/image
  * @packageDocumentation
@@ -97,9 +98,10 @@ export async function GET(
 /**
  * Generate the header image for this session, if one does not already exist.
  *
- * **Authentication:** Required — session cookie or `?token=`. Only the
- * climber who logged the session may trigger generation (`403` otherwise),
- * since each call costs real inference.
+ * **Authentication:** Required — session cookie or `?token=`. Any signed-in
+ * climber may trigger generation for any session, not just their own: a
+ * session is worth a banner whoever opens it first. Sign-in is still required
+ * because each call costs real inference and should be attributable.
  *
  * Generation is idempotent: the handler claims the job by inserting a
  * `pending` row with `ON CONFLICT DO NOTHING`, so concurrent requests for the
@@ -114,7 +116,9 @@ export async function GET(
  *
  * @param req - Incoming request. No body. Query parameter:
  *   - `retry=1` — the owner explicitly retrying an exhausted session; resets
- *     the attempt budget. Still subject to the `pending` lock.
+ *     the attempt budget. Still subject to the `pending` lock, and ignored
+ *     for anyone but the owner — otherwise a passer-by could spend a
+ *     session's retry budget over and over.
  * @param params - Route params. `id` is the session slug.
  *
  * @returns `{ sessionId, status, url?, canRetry, attempts }` — `ready` once
@@ -122,7 +126,6 @@ export async function GET(
  *   it, `failed` if this attempt (or the budget) ran out.
  *
  * @returns `401` if not authenticated.
- * @returns `403` if the caller does not own the session.
  * @returns `404` if the session does not exist.
  * @returns `422` if the session has no climbs to draw from.
  * @returns `502` if the image could not be generated.
@@ -143,20 +146,16 @@ export async function POST(
     const session = await db("tick_sessions").where({ id }).first();
     if (!session) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    if (session.user_id !== userId) {
-      // Permission event: someone tried to spend inference on another climber's session.
-      Sentry.logger.warn("Forbidden session image generation", {
-        action: "create", resource: "session_image", "session.id": id,
-        owner: session.user_id, outcome: "forbidden",
-      });
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const isOwner = session.user_id === userId;
 
     // `?retry=1` is the owner explicitly asking again after the automatic
     // budget ran out — it resets the counter rather than bypassing the lock.
-    const force = req.nextUrl.searchParams.get("retry") === "1";
+    // A visitor may generate a missing banner, but not reset a spent budget:
+    // the cap is what stops a session that keeps failing from being retried
+    // by every person who opens it.
+    const force = req.nextUrl.searchParams.get("retry") === "1" && isOwner;
 
-    const claim = await claimGeneration(id, userId, force);
+    const claim = await claimGeneration(id, session.user_id, force);
     if (claim.outcome !== "claimed") {
       // Already ready, mid-flight, or out of retries — never generate twice.
       Sentry.logger.info("Session image generation skipped", {
@@ -211,9 +210,11 @@ export async function POST(
       updated_at: db.fn.now(),
     });
 
-    // Audit event: an image now exists for this session, and who caused it.
+    // Audit event: the actor may not be the session's owner, so record both —
+    // who spent the inference, and whose session it bought a banner for.
     Sentry.logger.info("Session image stored", {
       action: "create", resource: "session_image", "session.id": id,
+      owner: session.user_id, "image.by_owner": isOwner,
       "ai.image_model": banner.model, "image.bytes": banner.bytes.length, outcome: "ready",
     });
 
@@ -230,15 +231,19 @@ export async function POST(
  * Returns `"claimed"` when this request should generate, or the current status
  * when it should not: `"ready"` (already generated — the no-regeneration rule)
  * or `"pending"` (another request got there first).
+ *
+ * `ownerId` is the session's climber, not whoever triggered this request — the
+ * row's `user_id` is what CASCADE-deletes the banner along with its account,
+ * so it has to follow the session, not the passer-by who happened to open it.
  */
 async function claimGeneration(
   sessionId: string,
-  userId: string,
+  ownerId: string,
   force: boolean,
 ): Promise<{ outcome: "claimed" | "ready" | "pending" | "exhausted"; attempts: number }> {
   // First writer wins; everyone else falls through to the status read below.
   const inserted = await db("session_images")
-    .insert({ session_id: sessionId, user_id: userId, status: "pending", attempts: 1 })
+    .insert({ session_id: sessionId, user_id: ownerId, status: "pending", attempts: 1 })
     .onConflict("session_id")
     .ignore()
     .returning("session_id");
@@ -273,7 +278,7 @@ async function claimGeneration(
     )
     .update({
       status:     "pending",
-      user_id:    userId,
+      user_id:    ownerId,
       error:      null,
       attempts:   force ? 1 : db.raw("attempts + 1"),
       updated_at: db.fn.now(),

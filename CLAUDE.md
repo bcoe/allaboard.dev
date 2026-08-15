@@ -555,7 +555,7 @@ curl -H "Cookie: $COOKIE" -H "Origin: http://localhost:3000" \
 | `log_entries` | `POST /api/log-entries` | `session.userId === body.userId` |
 | `boards` | `PATCH /api/boards/[id]` | `session.userId === board.created_by` |
 | `follows` | `POST/DELETE /api/users/[handle]/follow` | `session.userId` must be set (follower is always the caller) |
-| `session_images` | `POST /api/tick-sessions/[id]/image` | `session.userId === tick_sessions.user_id` |
+| `session_images` | `POST /api/tick-sessions/[id]/image` | any authenticated user (`session.userId` set); ownership only gates `?retry=1` |
 
 ### Important: clean up after testing
 
@@ -615,7 +615,9 @@ Each climbing session permalink (`/user/:handle/sessions/:id`) carries a 1200×4
 
 Two model calls through the **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`), both in `src/lib/server/sessionImage.ts`:
 
-1. **Art direction** (`AI_PROMPT_MODEL`, default `anthropic/claude-sonnet-5`) — reads the session brief and writes a single image prompt. Two constraints live in the system prompt so nothing in the notes can dilute them: the **notes outrank the climb names** (a name may suggest a motif, but the notes decide the mood), and the image must contain **no text of any kind**. The house style is dark charcoal + warm stone with one ember-orange accent, generous negative space, and one quiet deadpan visual joke.
+1. **Art direction** (`AI_PROMPT_MODEL`, default `anthropic/claude-sonnet-5`) — reads the session brief and writes a single image prompt. Three constraints live in the system prompt so nothing in the notes can dilute them: the **notes outrank the climb names** (a name may suggest a motif, but the notes decide the mood); **at least three specifics of the session** (a note's image, a name's motif, a grade, an attempt count, hours spent) must be woven into **one coherent scene** rather than a collage, so the banner is recognisably *this* session; and the image must contain **no text of any kind**.
+
+   The house style is a legible bouldering gym — chalked plastic holds and volumes on an overhanging wall, mats, tape, dim rafters — drawn as **cel-shaded anime** in the cinematic register of Ghost in the Shell but a shade lighter and warmer, in dark charcoal + warm stone with one ember-orange accent, generous negative space, and one quiet deadpan visual joke.
 2. **Render** (`AI_IMAGE_MODEL`, default `bfl/flux-2-max`) — renders that prompt at exactly `1200x400`.
 
 > **Why Flux 2?** It honours arbitrary aspect ratios and returns exactly 1200×400. The OpenAI image models reject anything outside 1024×1024 / 1536×1024 / 1024×1536, Imagen is limited to a fixed set of ratios, and Seedream enforces a ~3.7 MP minimum — all of which would need cropping. `bfl/flux-2-pro` is a faster (~8s vs ~17s) alternative if latency matters more than composition.
@@ -640,8 +642,10 @@ Failures are stored via `describeError`, which flattens the AI SDK's status code
 
 ### ACL
 
-- **Trigger generation** (`POST`): the session owner only (`session.user_id === session.userId`). Each call costs real inference, so visitors never trigger it.
-- **View** (`GET` status and `GET .../raw`): public, like the session itself. A visitor sees the banner only once the owner's visit has produced it.
+- **Trigger generation** (`POST`): any authenticated user, for any session — a session earns its banner on the first visit by anyone signed in, not only its owner. Sign-in is still required because each call costs real inference and should be attributable to an account.
+- **Manual retry** (`POST ?retry=1`): the session owner only. The `attempts` cap is what stops a session that keeps failing from being retried by everyone who opens it, so only the owner may reset it; for anyone else the flag is ignored (treated as an ordinary POST). The "Try again" affordance is likewise rendered for the owner only.
+- **View** (`GET` status and `GET .../raw`): public, like the session itself. A signed-out visitor never triggers generation and renders nothing where a banner has yet to be made.
+- **Row ownership**: `session_images.user_id` is always the session's climber, never the visitor who triggered generation — that column is what CASCADE-deletes the banner with its account, so it has to follow the session.
 
 ### Frontend
 
