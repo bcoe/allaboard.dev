@@ -3,7 +3,7 @@
  * Credentials are included on every request so the auth session cookie is sent.
  */
 
-import { Board, Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity, Comment, InboxItem, TickSessionSummary, TickSessionDetail } from "@/lib/types";
+import { Board, Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity, Comment, InboxItem, TickSessionSummary, TickSessionDetail, SessionImage } from "@/lib/types";
 import type { FeatureFlags } from "@/lib/featureFlags";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -117,6 +117,25 @@ export async function getSession(id: string): Promise<TickSessionDetail | undefi
   } catch {
     return undefined;
   }
+}
+
+/** Check whether a session has an AI-generated header banner yet. */
+export async function getSessionImage(id: string): Promise<SessionImage> {
+  return api<SessionImage>(`/tick-sessions/${encodeURIComponent(id)}/image`);
+}
+
+/**
+ * Ask the server to generate this session's header banner.
+ *
+ * Owner-only, and a no-op if one already exists. The request is held for the
+ * whole pipeline (~20–30s), so callers should show a placeholder meanwhile.
+ *
+ * Pass `force` when the climber is explicitly retrying a session that has
+ * already spent its automatic retry budget.
+ */
+export async function generateSessionImage(id: string, force = false): Promise<SessionImage> {
+  const qs = force ? "?retry=1" : "";
+  return api<SessionImage>(`/tick-sessions/${encodeURIComponent(id)}/image${qs}`, { method: "POST" });
 }
 
 

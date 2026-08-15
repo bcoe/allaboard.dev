@@ -122,6 +122,8 @@ Migration files go in `api/migrations/` and are named `YYYYMMDDHHMMSS_descriptio
 11. `20260722000001_add_duration_to_ticks` — adds `duration_minutes` (nullable) to ticks
 12. `20260722000002_create_tick_sessions` — tick_sessions table (denormalized climbing sessions)
 13. `20260722000003_tick_sessions_trigger` — `grade_rank()`, `recompute_tick_sessions()`, `tick_sessions_sync` trigger, and backfill of existing sessions
+14. `20260815000001_create_session_images` — session_images table (AI-generated session header banners)
+15. `20260815000002_add_attempts_to_session_images` — adds `attempts` so a failed banner retries a bounded number of times
 
 ---
 
@@ -218,6 +220,24 @@ Denormalized climbing sessions, derived entirely from `ticks` and maintained by 
 | created_at | timestamp | |
 
 Session membership is defined by the `[started_at, ended_at]` window (no FK on `ticks`), so the detail view reads live tick data. `grade_rank(text)` is an immutable SQL helper ordering the V-scale (incl. `V5+`/`V8+`).
+
+### `session_images`
+One AI-generated header banner per climbing session (see **Session Header Images** below).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| session_id | text | primary key; the `tick_sessions` slug. **No FK** — see note below |
+| user_id | text | FK → users.id (CASCADE) |
+| status | text | `pending` \| `ready` \| `failed`; doubles as the generation lock |
+| attempts | integer | generation attempts spent; capped at 3 before the session is left alone |
+| model | text | image model that produced `data` |
+| prompt | text | the generated image prompt (kept for debugging) |
+| mime_type | text | e.g. `image/jpeg` |
+| data | bytea | image bytes; null until `status = 'ready'` |
+| error | text | failure reason when `status = 'failed'` |
+| created_at / updated_at | timestamp | |
+
+> **Why a separate table and no FK to `tick_sessions`?** The `tick_sessions_sync` trigger rebuilds a user's sessions with DELETE + INSERT on every tick change, so anything stored on that row (or any FK pointing at it) is destroyed the next time the climber logs a climb. The session slug is deterministic and survives those rebuilds, which makes it a stable key. The FK to `users` is what cleans these rows up.
 
 ---
 
@@ -442,6 +462,9 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | DELETE | `/api/ticks/:id` | `src/app/api/ticks/[id]/route.ts` |
 | GET | `/api/tick-sessions?userId=` | `src/app/api/tick-sessions/route.ts` |
 | GET | `/api/tick-sessions/:id` | `src/app/api/tick-sessions/[id]/route.ts` |
+| GET | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
+| POST | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
+| GET | `/api/tick-sessions/:id/image/raw` | `src/app/api/tick-sessions/[id]/image/raw/route.ts` |
 | GET | `/api/auth/me` | `src/app/api/auth/me/route.ts` |
 | POST | `/api/auth/logout` | `src/app/api/auth/logout/route.ts` |
 | GET | `/api/auth/google` | `src/app/api/auth/google/route.ts` |
@@ -532,6 +555,7 @@ curl -H "Cookie: $COOKIE" -H "Origin: http://localhost:3000" \
 | `log_entries` | `POST /api/log-entries` | `session.userId === body.userId` |
 | `boards` | `PATCH /api/boards/[id]` | `session.userId === board.created_by` |
 | `follows` | `POST/DELETE /api/users/[handle]/follow` | `session.userId` must be set (follower is always the caller) |
+| `session_images` | `POST /api/tick-sessions/[id]/image` | `session.userId === tick_sessions.user_id` |
 
 ### Important: clean up after testing
 
@@ -580,6 +604,50 @@ Logs are the default tool for understanding runtime behavior — cheap to add, a
 
 ### Filtering & sampling
 Not all data is worth keeping. Use `beforeSend` / `beforeSendLog` to drop `debug` and development-environment logs and to scrub sensitive fields. Structured keys make selective censoring or dropping straightforward.
+
+---
+
+## Session Header Images
+
+Each climbing session permalink (`/user/:handle/sessions/:id`) carries a 1200×400 AI-generated banner: a visual read of what that session *felt* like, drawn from the climbs the climber logged and the notes they wrote.
+
+### Pipeline
+
+Two model calls through the **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`), both in `src/lib/server/sessionImage.ts`:
+
+1. **Art direction** (`AI_PROMPT_MODEL`, default `anthropic/claude-sonnet-5`) — reads the session brief and writes a single image prompt. Two constraints live in the system prompt so nothing in the notes can dilute them: the **notes outrank the climb names** (a name may suggest a motif, but the notes decide the mood), and the image must contain **no text of any kind**. The house style is dark charcoal + warm stone with one ember-orange accent, generous negative space, and one quiet deadpan visual joke.
+2. **Render** (`AI_IMAGE_MODEL`, default `bfl/flux-2-max`) — renders that prompt at exactly `1200x400`.
+
+> **Why Flux 2?** It honours arbitrary aspect ratios and returns exactly 1200×400. The OpenAI image models reject anything outside 1024×1024 / 1536×1024 / 1024×1536, Imagen is limited to a fixed set of ratios, and Seedream enforces a ~3.7 MP minimum — all of which would need cropping. `bfl/flux-2-pro` is a faster (~8s vs ~17s) alternative if latency matters more than composition.
+
+### Generate-once semantics
+
+A **successful** banner is generated once and never regenerated, even after new climbs are logged into that session. `POST` claims the job by inserting a `pending` row with `ON CONFLICT DO NOTHING`, so concurrent page views can never both pay for an image.
+
+### Failure and retry
+
+Image generation fails transiently — a malformed gateway response, an upstream 5xx. Recovery is bounded at three levels:
+
+1. **In-request** — `renderWithRetry` retries the image call once. The AI SDK retries its own retryable errors but treats a malformed response body as terminal, which is the failure seen in practice ("Invalid JSON response" after a full ~22s render). Worst case ~50s, inside the route's 60s budget.
+2. **Across visits** — a `failed` row is re-claimed and retried on the next page view while `attempts < MAX_ATTEMPTS` (3). A `pending` row stranded over five minutes by a dead process is reclaimed the same way. The server reports this as `canRetry` so the retry budget lives in one place.
+3. **Manual** — once the budget is spent the owner sees a quiet "Couldn't picture this session · Try again"; that button POSTs `?retry=1`, which resets `attempts` (it does *not* bypass the `pending` lock).
+
+> **Why bother:** the original design had no way back from `failed` — the client only POSTed when status was `none`, so a single transient flake left the session permanently blank with no feedback. The server's reclaim path existed but was unreachable.
+
+Failures are stored via `describeError`, which flattens the AI SDK's status code, response body, and nested cause into one searchable line — bare `err.message` yields uninformative strings like "Invalid JSON response". The same failures go to Sentry tagged `feature: session_image`.
+
+### What gets logged
+
+### ACL
+
+- **Trigger generation** (`POST`): the session owner only (`session.user_id === session.userId`). Each call costs real inference, so visitors never trigger it.
+- **View** (`GET` status and `GET .../raw`): public, like the session itself. A visitor sees the banner only once the owner's visit has produced it.
+
+### Frontend
+
+`src/components/SessionHeaderImage.tsx` owns the whole lifecycle. Generation takes ~20–30s inline, so the component shows a placeholder sized exactly like the finished banner (no layout shift): a dim stone gradient with a slow `animate-banner-sweep` warm sweep, defined in `globals.css` and disabled under `prefers-reduced-motion`. The image fades in on `load`.
+
+The component POSTs when status is `none`, **or** when it is `failed` and the server still reports `canRetry` — that second case is what makes a transient failure heal itself on the next visit. A visitor never triggers generation and never sees a failure state; a missing banner simply renders nothing rather than an empty 400px frame.
 
 ---
 
@@ -804,5 +872,8 @@ Next.js automatically loads these files (in priority order, highest last):
 | `DATABASE_URL` | Vercel (Neon auto) | Pooled Neon connection — fallback if above absent |
 | `PGUSER` | `.env.local` | Postgres user for local dev (only if differs from OS user) |
 | `META_APP_ACCESS_TOKEN` | `.env.local` / Vercel | `{App ID}|{Client Token}` from a Meta Developer app — required for Instagram oEmbed thumbnail fetching |
+| `AI_GATEWAY_API_KEY` | `.env.local` / Vercel | Vercel AI Gateway key — required for session header images and `npm run ai:hello` |
+| `AI_PROMPT_MODEL` | optional | Overrides the art-direction model (default `anthropic/claude-sonnet-5`) |
+| `AI_IMAGE_MODEL` | optional | Overrides the image model (default `bfl/flux-2-max`) |
 
 `SESSION_SECRET` must also be added to Vercel Project → Settings → Environment Variables.

@@ -92,6 +92,18 @@ export interface TickSessionDetail extends TickSessionSummary {
   ticks: UserTick[];
 }
 
+/** State of a session's AI-generated header banner.
+ *  `none` = never requested; `ready` = `url` is populated. */
+export interface SessionImage {
+  sessionId: string;
+  status: "none" | "pending" | "ready" | "failed";
+  url?: string;
+  /** Whether a failed banner still has attempts left in its retry budget. */
+  canRetry?: boolean;
+  /** Generation attempts spent so far. */
+  attempts?: number;
+}
+
 export interface Climb {
   id: string;
   name: string;

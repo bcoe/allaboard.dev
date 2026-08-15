@@ -761,6 +761,68 @@ paths:
           description: A ClimberStats object.
         "500":
           description: database error.
+  /api/tick-sessions/{id}/image/raw:
+    get:
+      summary: Serve the generated header image for a session.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The raw image bytes, with an immutable one-year cache header.
+        "404":
+          description: no image has been generated for this session.
+        "500":
+          description: database error.
+  /api/tick-sessions/{id}/image:
+    get:
+      summary: Report whether this session has a generated header image.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "{ sessionId, status, url?, canRetry, attempts } where status is none, pending, ready, or failed. url is present only when ready; canRetry says whether a failed session still has attempts left."
+        "500":
+          description: database error.
+    post:
+      summary: Generate the header image for this session, if one does not already exist.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: retry=1
+          in: query
+          required: false
+          description: the owner explicitly retrying an exhausted session; resets
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "{ sessionId, status, url?, canRetry, attempts } — ready once the image is stored, pending if another request is already generating it, failed if this attempt (or the budget) ran out."
+        "401":
+          description: not authenticated.
+        "403":
+          description: the caller does not own the session.
+        "404":
+          description: the session does not exist.
+        "422":
+          description: the session has no climbs to draw from.
+        "500":
+          description: database error.
+        "502":
+          description: the image could not be generated.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
   /api/tick-sessions/{id}:
     get:
       summary: Fetch a single climbing session and the climbs logged during it.

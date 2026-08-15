@@ -15,3 +15,19 @@
 body {
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Slow warm sweep across the session-banner placeholder while the image is
+   being generated. Deliberately unhurried — generation takes ~30s, and a
+   fast spinner would over-promise. */
+@keyframes banner-sweep {
+  0%   { transform: translateX(-60%); }
+  100% { transform: translateX(160%); }
+}
+
+.animate-banner-sweep {
+  animation: banner-sweep 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-banner-sweep { animation: none; }
+}
