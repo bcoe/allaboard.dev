@@ -4,16 +4,19 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getSession } from "@/lib/db";
+import { useAuth } from "@/lib/auth-context";
 import { TickSessionDetail, UserTick } from "@/lib/types";
 import { sessionTitle, formatDuration, timeAgo } from "@/lib/utils";
 import { buildSessionSummaryText } from "@/lib/sessionSummary";
 import GradeBadge from "@/components/GradeBadge";
 import StarRating from "@/components/StarRating";
+import SessionHeaderImage from "@/components/SessionHeaderImage";
 
 export default function SessionDetailPage() {
   const params = useParams<{ handle: string; id: string }>();
   const { handle, id } = params;
 
+  const { user } = useAuth();
   const [session, setSession] = useState<TickSessionDetail | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -51,6 +54,9 @@ export default function SessionDetailPage() {
         </svg>
         Back to sessions
       </Link>
+
+      {/* AI banner — generated once, on the owner's first visit */}
+      <SessionHeaderImage sessionId={session.id} isOwner={user?.id === session.userId} />
 
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mt-4">

@@ -13,9 +13,14 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^3.0.166",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/core": "^2.6.1",
     "@scalar/api-reference-react": "^0.9.18",
     "@sentry/nextjs": "^10.46.0",
+    "ai": "^6.0.246",
     "canvas-confetti": "^1.9.4",
+    "dotenv": "^17.4.2",
     "echarts": "^6.0.0",
     "iron-session": "^8.0.4",
     "knex": "^3.1.0",
@@ -26,6 +31,7 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
+    "@sentry/node": "^10.46.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
