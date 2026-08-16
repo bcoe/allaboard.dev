@@ -62,6 +62,50 @@ describe("buildSessionBrief", () => {
     expect(brief).toContain("(V6, not sent (still working it), 12 attempts)");
   });
 
+  it("passes the climb's own description, a second source of motif", () => {
+    const brief = buildSessionBrief(session, [tick({ description: "May awesome climb" })]);
+    expect(brief).toContain('Climb description: "May awesome climb"');
+  });
+
+  it("passes the board, angle and star rating", () => {
+    const brief = buildSessionBrief(session, [tick({ rating: 3 })]);
+    expect(brief).toContain("Kilter Board (Original) at 40°");
+    expect(brief).toContain("rated 3/4 by the climber");
+  });
+
+  it("passes a grade opinion only when it disagrees with the book grade", () => {
+    expect(buildSessionBrief(session, [tick({ suggestedGrade: "V8" })]))
+      .toContain("more like V8");
+    expect(buildSessionBrief(session, [tick({ suggestedGrade: "V6" })]))
+      .not.toContain("more like");
+  });
+
+  it("passes the minutes spent on a single climb", () => {
+    expect(buildSessionBrief(session, [tick({ durationMinutes: 40 })]))
+      .toContain("40 minutes on it");
+  });
+
+  it("gives a note-less session something to draw from beyond the name", () => {
+    // The failure this guards: a one-climb session with no comment used to
+    // reach the model as a name and a grade, which cannot supply the three
+    // specific details the art direction asks for.
+    const brief = buildSessionBrief(
+      { tickCount: 1, sentCount: 1, hardestGrade: "V3", totalMinutes: undefined },
+      [tick({ climbName: "batman and robin climb", grade: "V3", comment: undefined,
+              description: "May awesome climb", rating: 4 })],
+    );
+
+    expect(brief).toContain("Climber's note: (none)");
+    expect(brief).toContain('Climb description: "May awesome climb"');
+    expect(brief).toContain("rated 4/4 by the climber");
+    expect(brief).toContain("Kilter Board (Original) at 40°");
+  });
+
+  it("truncates a runaway climb description too", () => {
+    const brief = buildSessionBrief(session, [tick({ description: "z".repeat(1000) })]);
+    expect(brief).toContain("z".repeat(400) + "…");
+  });
+
   it("truncates a runaway note rather than sending an essay to the model", () => {
     const brief = buildSessionBrief(session, [tick({ comment: "x".repeat(1000) })]);
     expect(brief).toContain("…");

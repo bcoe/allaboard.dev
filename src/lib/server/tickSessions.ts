@@ -35,7 +35,7 @@ export async function loadSessionTicks(session: SessionWindow): Promise<UserTick
       "t.suggested_grade", "t.instagram_url", "t.attempts",
       "t.duration_minutes", "t.created_at",
       "c.id as climb_id", "c.name as climb_name", "c.grade",
-      "c.angle", "b.name as board_name",
+      "c.angle", "c.description", "b.name as board_name",
     );
 
   return rows.map((r) => ({
@@ -45,6 +45,7 @@ export async function loadSessionTicks(session: SessionWindow): Promise<UserTick
     grade:           r.grade,
     boardName:       r.board_name ?? "",
     angle:           r.angle ?? 40,
+    description:     r.description ?? undefined,
     date:            r.date,
     sent:            r.sent,
     rating:          r.rating,

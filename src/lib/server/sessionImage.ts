@@ -91,13 +91,15 @@ const ART_DIRECTION = `You are the art director for allaboard, a bouldering logb
 You will be given the climbs a climber logged in one session and, more importantly, the notes they wrote about each climb. Turn that session into one image prompt.
 
 Rules:
-- Build the scene from at least THREE specific details of this session — an image or mood from a note, a motif suggested by a climb name, a grade fought for, an attempt count, the hours spent. More is better. They must resolve into ONE coherent moment, sharing a setting and a light source, never a collage of unrelated parts. The climber should recognise their own session in it.
+- Build the scene from at least THREE specific details of this session — an image or mood from a note, a motif from a climb name or its description, the board and its angle, a grade fought for, an attempt count, a star rating, the minutes spent. More is better. They must resolve into ONE coherent moment, sharing a setting and a light source, never a collage of unrelated parts. The climber should recognise their own session in it.
+- Those details must survive into the prompt as CONCRETE, NAMEABLE THINGS a renderer can draw — a specific object, gesture, posture, or feature of the wall. "The mood of a hard session" is not a detail; a chalk-blasted sloper at the lip with a single shoe smear below it is.
+- When a session is thin — one climb, no notes — lean harder on what you do have: the climb's name, its description, its grade and angle, how the climber rated it. Never pad with generic climbing imagery.
 - The NOTES are the primary source. They carry the mood: the struggle, the triumph, the tedium, the absurdity. Climb names are secondary flavour — a name may suggest an object or motif, but never let a name override what the notes say. If the notes and the names disagree, follow the notes.
-- Setting: a real bouldering gym, plainly legible as one. Chalked plastic holds and volumes of distinct shapes bolted across an overhanging wall, crash mats, tape, brushes, high dim rafters. The holds must read unmistakably as holds.
-- Style: anime. Crisp cel-shaded linework and cinematic staging in the register of Ghost in the Shell, but a shade lighter and warmer than that — detailed and grounded, never chibi, never soft pastel fantasy.
+- Setting: a real bouldering gym, plainly legible as one, and a well-lit one. Chalked plastic holds and volumes of distinct shapes bolted across an overhanging wall, crash mats, tape, brushes, high rafters, daylight from clerestory windows. The holds must read unmistakably as holds.
+- Style: anime. Crisp cel-shaded linework and cinematic staging in the register of Ghost in the Shell, but brighter, warmer and more colourful than that — detailed and grounded, never chibi, never soft pastel fantasy.
 - The result is a 3:1 ultrawide banner sitting behind a page title: calm and uncluttered, generous negative space, the subject off to one side, nothing busy or high-contrast through the middle.
 - It is rendered in a wider-than-tall frame and then cropped to that 3:1 band from the centre, so the top and bottom quarters are cut away. Keep every essential element inside the central horizontal band, and ask for a composition that is deliberately empty above and below it.
-- Palette: deep charcoal and warm stone browns with a single ember-orange accent light. Moody and cinematic, but not murky.
+- Palette: bright, open and saturated — a lit room, never a dim cave. Warm stone, pale concrete and sunlit dust, with the light coming from real windows or clean house lighting. Let the HOLDS carry strong colour: bold primary reds, blues, yellows and greens scattered across the wall the way a real gym looks, plus an ember-orange accent for warmth. Keep the shadows open and readable — mid-tones everywhere, nothing crushed to black.
 - ABSOLUTELY NO text, letters, numbers, words, signage, logos, labels, or writing of any kind anywhere in the image. Never ask for any.
 - Aim for one quiet visual joke: deadpan, surreal, faintly absurd — the kind that earns a snort, not a laugh track. If the notes are euphoric, go gently mythic. If they read as suffering, go gently ridiculous. Never a meme, never slapstick, never a caricature.
 
@@ -108,6 +110,13 @@ Reply with ONLY the image prompt, one paragraph, under 120 words. No preamble, n
  *
  * Climbs are listed in the order they were logged. Notes are labelled
  * explicitly so the model can tell them apart from the names.
+ *
+ * Everything the tick knows goes in, not just the name and the note. Plenty of
+ * sessions carry no notes at all — the art direction asks for three specific
+ * details per image, and a bare name and grade cannot supply them. The climb's
+ * description, its board and angle, the climber's star rating and their own
+ * grade opinion are what stop those sessions falling back on generic climbing
+ * imagery.
  */
 export function buildSessionBrief(
   session: Pick<TickSessionSummary, "tickCount" | "sentCount" | "hardestGrade" | "totalMinutes">,
@@ -124,6 +133,23 @@ export function buildSessionBrief(
     const meta = [tick.grade, tick.sent ? "sent" : "not sent (still working it)"];
     if (tick.attempts != null) meta.push(`${tick.attempts} attempts`);
     lines.push(`${i + 1}. Climb name: "${tick.climbName}" (${meta.join(", ")})`);
+
+    // The climb's own description — a second source of motif alongside the
+    // name, and often the only one when the climber left no note.
+    const description = tick.description?.trim();
+    if (description) lines.push(`   Climb description: "${truncate(description)}"`);
+
+    // Concrete details worth drawing from on a session where the notes are
+    // thin: the board and its angle, what the climber made of the climb, how
+    // long they stayed on it.
+    const detail: string[] = [];
+    if (tick.boardName) detail.push(`${tick.boardName} at ${tick.angle}°`);
+    if (tick.rating) detail.push(`rated ${tick.rating}/4 by the climber`);
+    if (tick.suggestedGrade && tick.suggestedGrade !== tick.grade) {
+      detail.push(`who felt it was more like ${tick.suggestedGrade}`);
+    }
+    if (tick.durationMinutes != null) detail.push(`${tick.durationMinutes} minutes on it`);
+    if (detail.length) lines.push(`   ${detail.join(", ")}.`);
 
     const note = tick.comment?.trim();
     lines.push(note ? `   Climber's note: "${truncate(note)}"` : `   Climber's note: (none)`);

@@ -61,6 +61,8 @@ export interface UserTick {
   grade: Grade;
   boardName: string;
   angle: number;
+  /** The climb's own description, written by whoever submitted it. */
+  description?: string;
   suggestedGrade?: Grade;
   rating: number;
   comment?: string;
