@@ -19,19 +19,42 @@
 import * as Sentry from "@sentry/nextjs";
 import { generateText, generateImage } from "ai";
 import { gateway } from "@ai-sdk/gateway";
+import sharp from "sharp";
 import type { TickSessionSummary, UserTick } from "@/lib/types";
 
 /** Writes the image prompt. Cheap, fast, and the only step that sees the notes. */
 const PROMPT_MODEL = process.env.AI_PROMPT_MODEL ?? "anthropic/claude-sonnet-5";
 
 /**
- * Renders the banner. Flux 2 is used because it honours arbitrary aspect
- * ratios — it returns exactly 1200x400, where the OpenAI and Imagen image
- * models are locked to a handful of near-square sizes that would need cropping.
+ * Renders the banner.
+ *
+ * The GPT image models do not take arbitrary aspect ratios — they render a
+ * fixed set of near-square sizes — so the widest landscape option is rendered
+ * and then cropped to the banner's 3:1 by `cropToBanner`. That costs the top
+ * and bottom quarters of the frame, which is why the art direction tells the
+ * prompt model to keep the subject in the central band.
  */
-const IMAGE_MODEL = process.env.AI_IMAGE_MODEL ?? "bfl/flux-2-max";
+const IMAGE_MODEL = process.env.AI_IMAGE_MODEL ?? "openai/gpt-image-2";
 
+/**
+ * What the model is asked for, before cropping: the widest landscape size the
+ * GPT image models support (3:2). Overridable because it is model-specific —
+ * a model that renders 3:1 natively wants `1200x400` here, which makes the
+ * crop a no-op re-encode rather than a cut.
+ */
+const RENDER_SIZE = (process.env.AI_IMAGE_RENDER_SIZE ?? "1536x1024") as `${number}x${number}`;
+
+/** The banner's finished dimensions, after cropping. */
+export const BANNER_WIDTH = 1200;
+export const BANNER_HEIGHT = 400;
 export const BANNER_SIZE = "1200x400" as const;
+
+/**
+ * JPEG quality for the cropped banner. 86 keeps a 1200x400 render around
+ * 150–250 KB — small enough to sit in a `bytea` column comfortably, and past
+ * the point where more quality is visible behind a page title.
+ */
+const BANNER_JPEG_QUALITY = 86;
 
 /** Notes longer than this are truncated — a banner needs the gist, not an essay. */
 const MAX_NOTE_CHARS = 400;
@@ -73,6 +96,7 @@ Rules:
 - Setting: a real bouldering gym, plainly legible as one. Chalked plastic holds and volumes of distinct shapes bolted across an overhanging wall, crash mats, tape, brushes, high dim rafters. The holds must read unmistakably as holds.
 - Style: anime. Crisp cel-shaded linework and cinematic staging in the register of Ghost in the Shell, but a shade lighter and warmer than that — detailed and grounded, never chibi, never soft pastel fantasy.
 - The result is a 3:1 ultrawide banner sitting behind a page title: calm and uncluttered, generous negative space, the subject off to one side, nothing busy or high-contrast through the middle.
+- It is rendered in a wider-than-tall frame and then cropped to that 3:1 band from the centre, so the top and bottom quarters are cut away. Keep every essential element inside the central horizontal band, and ask for a composition that is deliberately empty above and below it.
 - Palette: deep charcoal and warm stone browns with a single ember-orange accent light. Moody and cinematic, but not murky.
 - ABSOLUTELY NO text, letters, numbers, words, signage, logos, labels, or writing of any kind anywhere in the image. Never ask for any.
 - Aim for one quiet visual joke: deadpan, surreal, faintly absurd — the kind that earns a snort, not a laugh track. If the notes are euphoric, go gently mythic. If they read as suffering, go gently ridiculous. Never a meme, never slapstick, never a caricature.
@@ -129,7 +153,7 @@ async function renderWithRetry(prompt: string) {
       const result = await generateImage({
         model: gateway.imageModel(IMAGE_MODEL),
         prompt,
-        size: BANNER_SIZE,
+        size: RENDER_SIZE,
       });
 
       const image = result.images[0];
@@ -148,6 +172,41 @@ async function renderWithRetry(prompt: string) {
         "error.message": describeError(err),
       });
     }
+  }
+}
+
+/**
+ * Crops and re-encodes a render to exactly 1200x400.
+ *
+ * `cover` scales the render until it fills the banner, then takes the centre —
+ * from a 3:2 source that keeps the full width and the middle half of the
+ * height. The art direction is written to survive that cut.
+ *
+ * This never fails the pipeline. By the time it runs an image has already been
+ * paid for and generated, and an uncropped one still displays correctly: the
+ * page renders the banner in an `aspect-[3/1]` box with `object-cover`, so the
+ * browser makes the same centre cut. What is lost by falling back is stored
+ * bytes and a guaranteed-uniform asset, neither of which is worth discarding a
+ * finished image over — so a failure here is a warning, not a throw.
+ */
+async function cropToBanner(
+  bytes: Uint8Array,
+): Promise<{ bytes: Buffer; mimeType: string } | null> {
+  try {
+    const out = await sharp(bytes)
+      .resize(BANNER_WIDTH, BANNER_HEIGHT, { fit: "cover", position: "centre" })
+      .jpeg({ quality: BANNER_JPEG_QUALITY, mozjpeg: true })
+      .toBuffer();
+
+    return { bytes: out, mimeType: "image/jpeg" };
+  } catch (err) {
+    Sentry.logger.warn("Session banner crop failed, storing the render as-is", {
+      "ai.image_model": IMAGE_MODEL,
+      "image.render_size": RENDER_SIZE,
+      "image.bytes": bytes.length,
+      "error.message": describeError(err),
+    });
+    return null;
   }
 }
 
@@ -213,6 +272,10 @@ export async function generateSessionBanner(
       if (!prompt) throw new Error(`${PROMPT_MODEL} returned an empty image prompt`);
 
       const image = await renderWithRetry(prompt);
+      const cropped = await cropToBanner(image.uint8Array);
+
+      const bytes = cropped?.bytes ?? Buffer.from(image.uint8Array);
+      const mimeType = cropped?.mimeType ?? image.mediaType ?? "image/jpeg";
 
       Sentry.logger.info("Session banner generated", {
         "session.id": session.id,
@@ -223,17 +286,17 @@ export async function generateSessionBanner(
         // searchable across sessions (the row keeps a copy, but one at a time).
         "ai.image_prompt": forLog(prompt),
         "ai.prompt_chars": prompt.length,
-        "image.mime_type": image.mediaType,
-        "image.bytes": image.uint8Array.length,
+        "image.mime_type": mimeType,
+        // Both sizes: the render is what was paid for, the stored bytes are
+        // what the page serves, and the ratio between them is the crop.
+        "image.render_size": RENDER_SIZE,
+        "image.render_bytes": image.uint8Array.length,
+        "image.bytes": bytes.length,
+        "image.cropped": cropped !== null,
         tick_count: ticks.length,
       });
 
-      return {
-        prompt,
-        model: IMAGE_MODEL,
-        mimeType: image.mediaType ?? "image/jpeg",
-        bytes: Buffer.from(image.uint8Array),
-      };
+      return { prompt, model: IMAGE_MODEL, mimeType, bytes };
     },
   );
 }

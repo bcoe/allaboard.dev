@@ -140,6 +140,22 @@ export async function generateSessionImage(id: string, force = false): Promise<S
   return api<SessionImage>(`/tick-sessions/${encodeURIComponent(id)}/image${qs}`, { method: "POST" });
 }
 
+/**
+ * Replace a session's finished banner with a newly generated one.
+ *
+ * The only way past the generate-once rule, and the only call here that spends
+ * inference on a session that already has a perfectly good image — so it
+ * belongs to a deliberate button press, never to page load. Requires auth; the
+ * returned `url` carries a fresh `?v=` stamp so the new picture is not masked
+ * by the cached old one.
+ */
+export async function regenerateSessionImage(id: string): Promise<SessionImage> {
+  return api<SessionImage>(
+    `/tick-sessions/${encodeURIComponent(id)}/image?regenerate=1`,
+    { method: "POST" },
+  );
+}
+
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 

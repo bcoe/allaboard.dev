@@ -282,6 +282,133 @@ describe("POST /api/tick-sessions/[id]/image — generation", () => {
   });
 });
 
+// ── Regeneration ──────────────────────────────────────────────────────────────
+//
+// The one way past the generate-once rule. It replaces a finished banner, so
+// what matters is that it takes an explicit ask, that it cannot be used to
+// dodge the retry budget, and that the replacement is not masked by the cached
+// copy of the picture it replaced.
+
+describe("POST /api/tick-sessions/[id]/image?regenerate=1", () => {
+  const UPDATED = new Date("2026-08-15T12:00:00.000Z");
+
+  const regenReq = () =>
+    new NextRequest(
+      `http://localhost/api/tick-sessions/${SESSION_ID}/image?regenerate=1`,
+      { method: "POST" },
+    );
+
+  it("replaces a finished banner when asked outright", async () => {
+    mockGetIronSession.mockResolvedValue(authSession("alice") as never);
+    mockGenerate.mockResolvedValue(banner);
+
+    const store = b({ inserted: [], updated: [{ attempts: 1, updated_at: UPDATED }] });
+    mockDb
+      .mockReturnValueOnce(b({ first: sessionRow }))                                   // session lookup
+      .mockReturnValueOnce(store)                                                      // claim insert loses
+      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }))
+      .mockReturnValueOnce(store)                                                      // take over the ready row
+      .mockReturnValueOnce(b({ rows: [tickRow] }))                                     // session ticks
+      .mockReturnValueOnce(store);                                                     // store result
+
+    const res = await POST(regenReq(), params(SESSION_ID));
+    expect(res.status).toBe(201);
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    expect(store.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "ready", data: banner.bytes }),
+    );
+  });
+
+  it("stamps the new bytes with a fresh url so caches cannot serve the old picture", async () => {
+    mockGetIronSession.mockResolvedValue(authSession("alice") as never);
+    mockGenerate.mockResolvedValue(banner);
+
+    const store = b({ inserted: [], updated: [{ attempts: 1, updated_at: UPDATED }] });
+    mockDb
+      .mockReturnValueOnce(b({ first: sessionRow }))
+      .mockReturnValueOnce(store)
+      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }))
+      .mockReturnValueOnce(store)
+      .mockReturnValueOnce(b({ rows: [tickRow] }))
+      .mockReturnValueOnce(store);
+
+    const body = await (await POST(regenReq(), params(SESSION_ID))).json();
+    expect(body.url).toBe(
+      `/api/tick-sessions/${SESSION_ID}/image/raw?v=${UPDATED.getTime()}`,
+    );
+  });
+
+  it("is available to any signed-in climber, not just the session's owner", async () => {
+    mockGetIronSession.mockResolvedValue(authSession("bob") as never);
+    mockGenerate.mockResolvedValue(banner);
+
+    const store = b({ inserted: [], updated: [{ attempts: 1, updated_at: UPDATED }] });
+    mockDb
+      .mockReturnValueOnce(b({ first: sessionRow }))                                   // owned by alice
+      .mockReturnValueOnce(store)
+      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }))
+      .mockReturnValueOnce(store)
+      .mockReturnValueOnce(b({ rows: [tickRow] }))
+      .mockReturnValueOnce(store);
+
+    expect((await POST(regenReq(), params(SESSION_ID))).status).toBe(201);
+    // Still alice's row, even though bob paid for the picture.
+    expect(store.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "pending", user_id: "alice" }),
+    );
+  });
+
+  it("requires authentication", async () => {
+    mockGetIronSession.mockResolvedValue(unauthSession() as never);
+    expect((await POST(regenReq(), params(SESSION_ID))).status).toBe(401);
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("does not rescue an exhausted session — that budget is the owner's to reset", async () => {
+    mockGetIronSession.mockResolvedValue(authSession("bob") as never);
+
+    mockDb
+      .mockReturnValueOnce(b({ first: sessionRow }))
+      .mockReturnValueOnce(b({ inserted: [] }))
+      .mockReturnValueOnce(b({ first: { status: "failed", attempts: 3 } })) // budget spent
+      .mockReturnValueOnce(b({ updated: [] }));                             // nothing to reclaim
+
+    const body = await (await POST(regenReq(), params(SESSION_ID))).json();
+    expect(body).toMatchObject({ status: "failed", canRetry: false });
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("loses to a regeneration already in flight rather than generating twice", async () => {
+    mockGetIronSession.mockResolvedValue(authSession("alice") as never);
+
+    mockDb
+      .mockReturnValueOnce(b({ first: sessionRow }))
+      .mockReturnValueOnce(b({ inserted: [] }))
+      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }))
+      .mockReturnValueOnce(b({ updated: [] })); // someone else took the ready row first
+
+    const body = await (await POST(regenReq(), params(SESSION_ID))).json();
+    expect(body).toMatchObject({ status: "pending" });
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("still refuses to regenerate without the flag", async () => {
+    mockGetIronSession.mockResolvedValue(authSession("alice") as never);
+
+    mockDb
+      .mockReturnValueOnce(b({ first: sessionRow }))
+      .mockReturnValueOnce(b({ inserted: [] }))
+      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }));
+
+    const body = await (await POST(req("POST"), params(SESSION_ID))).json();
+    expect(body).toMatchObject({
+      status: "ready",
+      url: `/api/tick-sessions/${SESSION_ID}/image/raw?v=${UPDATED.getTime()}`,
+    });
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+});
+
 // ── GET /api/tick-sessions/[id]/image/raw ─────────────────────────────────────
 
 describe("GET /api/tick-sessions/[id]/image/raw", () => {

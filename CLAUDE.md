@@ -618,13 +618,22 @@ Two model calls through the **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`), both i
 1. **Art direction** (`AI_PROMPT_MODEL`, default `anthropic/claude-sonnet-5`) — reads the session brief and writes a single image prompt. Three constraints live in the system prompt so nothing in the notes can dilute them: the **notes outrank the climb names** (a name may suggest a motif, but the notes decide the mood); **at least three specifics of the session** (a note's image, a name's motif, a grade, an attempt count, hours spent) must be woven into **one coherent scene** rather than a collage, so the banner is recognisably *this* session; and the image must contain **no text of any kind**.
 
    The house style is a legible bouldering gym — chalked plastic holds and volumes on an overhanging wall, mats, tape, dim rafters — drawn as **cel-shaded anime** in the cinematic register of Ghost in the Shell but a shade lighter and warmer, in dark charcoal + warm stone with one ember-orange accent, generous negative space, and one quiet deadpan visual joke.
-2. **Render** (`AI_IMAGE_MODEL`, default `bfl/flux-2-max`) — renders that prompt at exactly `1200x400`.
+2. **Render** (`AI_IMAGE_MODEL`, default `openai/gpt-image-2`) — renders that prompt at `AI_IMAGE_RENDER_SIZE` (default `1536x1024`, ~23s).
+3. **Crop** (`cropToBanner`, sharp) — scales that render to cover 1200×400 and takes the centre, re-encoding to JPEG q86. This is what guarantees the shape contract; the page reserves a 3:1 box before the image loads, so a differently-shaped asset would be a layout bug.
 
-> **Why Flux 2?** It honours arbitrary aspect ratios and returns exactly 1200×400. The OpenAI image models reject anything outside 1024×1024 / 1536×1024 / 1024×1536, Imagen is limited to a fixed set of ratios, and Seedream enforces a ~3.7 MP minimum — all of which would need cropping. `bfl/flux-2-pro` is a faster (~8s vs ~17s) alternative if latency matters more than composition.
+> **Why a render-then-crop step?** The GPT image models only emit a fixed set of near-square sizes (1024×1024 / 1536×1024 / 1024×1536), so the widest landscape one is rendered and cut down. Cropping 3:2 → 3:1 costs the top and bottom quarters of the frame, which is why the art direction tells the prompt model to keep the subject in the central band and leave the margins deliberately empty. The step also normalises everything else: any model, any output size, one 1200×400 JPEG (~40 KB, down from ~200–250 KB when the model rendered 3:1 directly).
+>
+> The crop **never fails the pipeline**. It runs after an image has been paid for, and an uncropped render still displays correctly — the page uses `object-cover` in an `aspect-[3/1]` box, so the browser makes the same centre cut. A sharp failure is logged as a warning and the raw render is stored instead.
+>
+> `AI_IMAGE_RENDER_SIZE` exists because the right value is model-specific: a model that renders 3:1 natively (e.g. `bfl/flux-2-max`, the previous default) wants `1200x400` here, which turns the crop into a no-op re-encode rather than a cut.
 
 ### Generate-once semantics
 
-A **successful** banner is generated once and never regenerated, even after new climbs are logged into that session. `POST` claims the job by inserting a `pending` row with `ON CONFLICT DO NOTHING`, so concurrent page views can never both pay for an image.
+A **successful** banner is generated once and never regenerated on its own, even after new climbs are logged into that session. `POST` claims the job by inserting a `pending` row with `ON CONFLICT DO NOTHING`, so concurrent page views can never both pay for an image.
+
+The single exception is a deliberate press of the **regenerate** button in the banner's bottom-right corner (signed-in viewers only, `POST ?regenerate=1`). That takes over the `ready` row under a `WHERE status = 'ready'` predicate — the lock that makes two simultaneous presses produce one image. The old bytes stay in `data` until the new ones overwrite them, so a failed regeneration destroys nothing.
+
+Because the raw bytes are served `immutable`, the status `url` carries a `?v=<updated_at epoch ms>` stamp. Without it a regenerated banner would keep showing the previous picture out of cache — for the person who pressed the button, and for everyone who had already loaded the page.
 
 ### Failure and retry
 
@@ -643,6 +652,7 @@ Failures are stored via `describeError`, which flattens the AI SDK's status code
 ### ACL
 
 - **Trigger generation** (`POST`): any authenticated user, for any session — a session earns its banner on the first visit by anyone signed in, not only its owner. Sign-in is still required because each call costs real inference and should be attributable to an account.
+- **Regenerate** (`POST ?regenerate=1`): any authenticated user. The only way past the generate-once rule — it takes over a `ready` row, resets `attempts`, and overwrites `data` when the new render lands. Deliberately scoped to `ready` rows only: a `failed` one still follows the retry rules below, so this cannot be used as an owner-check-free way to reset a spent budget. It is still subject to the `pending` lock, so two people pressing at once produce one image.
 - **Manual retry** (`POST ?retry=1`): the session owner only. The `attempts` cap is what stops a session that keeps failing from being retried by everyone who opens it, so only the owner may reset it; for anyone else the flag is ignored (treated as an ordinary POST). The "Try again" affordance is likewise rendered for the owner only.
 - **View** (`GET` status and `GET .../raw`): public, like the session itself. A signed-out visitor never triggers generation and renders nothing where a banner has yet to be made.
 - **Row ownership**: `session_images.user_id` is always the session's climber, never the visitor who triggered generation — that column is what CASCADE-deletes the banner with its account, so it has to follow the session.
@@ -651,7 +661,9 @@ Failures are stored via `describeError`, which flattens the AI SDK's status code
 
 `src/components/SessionHeaderImage.tsx` owns the whole lifecycle. Generation takes ~20–30s inline, so the component shows a placeholder sized exactly like the finished banner (no layout shift): a dim stone gradient with a slow `animate-banner-sweep` warm sweep, defined in `globals.css` and disabled under `prefers-reduced-motion`. The image fades in on `load`.
 
-The component POSTs when status is `none`, **or** when it is `failed` and the server still reports `canRetry` — that second case is what makes a transient failure heal itself on the next visit. A visitor never triggers generation and never sees a failure state; a missing banner simply renders nothing rather than an empty 400px frame.
+The component POSTs when status is `none`, **or** when it is `failed` and the server still reports `canRetry` — that second case is what makes a transient failure heal itself on the next visit. A signed-out visitor never triggers generation and never sees a failure state; a missing banner simply renders nothing rather than an empty 400px frame.
+
+A signed-in viewer also gets a small regenerate button in the banner's bottom-right corner. It is styled to stay out of the way — it spends inference and overwrites a picture the climber may like — and the current banner **stays on screen** for the ~25s the call takes, since it is still the session's banner until a replacement actually arrives (and still is, if the render fails). The `<img>` is keyed on the versioned URL so the new bytes remount the element and re-fire `load`, giving the replacement the same fade-in as the original.
 
 ---
 
@@ -878,6 +890,7 @@ Next.js automatically loads these files (in priority order, highest last):
 | `META_APP_ACCESS_TOKEN` | `.env.local` / Vercel | `{App ID}|{Client Token}` from a Meta Developer app — required for Instagram oEmbed thumbnail fetching |
 | `AI_GATEWAY_API_KEY` | `.env.local` / Vercel | Vercel AI Gateway key — required for session header images and `npm run ai:hello` |
 | `AI_PROMPT_MODEL` | optional | Overrides the art-direction model (default `anthropic/claude-sonnet-5`) |
-| `AI_IMAGE_MODEL` | optional | Overrides the image model (default `bfl/flux-2-max`) |
+| `AI_IMAGE_MODEL` | optional | Overrides the image model (default `openai/gpt-image-2`) |
+| `AI_IMAGE_RENDER_SIZE` | optional | Size requested from the image model before cropping to 1200×400 (default `1536x1024`) |
 
 `SESSION_SECRET` must also be added to Vercel Project → Settings → Environment Variables.

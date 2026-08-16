@@ -19,12 +19,14 @@
  *                 owner gets a quiet "try again" — only they can reset it,
  *                 so only they are offered it; everyone else sees nothing.
  *
- * A *successful* banner is never regenerated, so the placeholder is shown at
- * most once per session in the happy path.
+ * A *successful* banner is never regenerated on its own, so the placeholder is
+ * shown at most once per session in the happy path. Signed-in viewers get a
+ * quiet corner button to ask for a different picture; that is the only path
+ * that replaces an image the session already has.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getSessionImage, generateSessionImage } from "@/lib/db";
+import { getSessionImage, generateSessionImage, regenerateSessionImage } from "@/lib/db";
 import type { SessionImage } from "@/lib/types";
 
 /** Poll interval while a generation started elsewhere is in flight. */
@@ -50,6 +52,7 @@ export default function SessionHeaderImage({
   const [image, setImage] = useState<SessionImage | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   // Generation is a side effect with a cost; StrictMode double-mounts in dev
   // would otherwise fire it twice (the server dedupes too, but not paying for
   // the round trip is better).
@@ -105,6 +108,24 @@ export default function SessionHeaderImage({
     setRetrying(false);
   }, [sessionId]);
 
+  /**
+   * Trade this banner for a different one.
+   *
+   * The current image stays on screen for the ~25s the call takes: it is still
+   * the session's banner until the replacement actually arrives, and if the
+   * render fails it still is. `loaded` resets only once new bytes are in hand,
+   * so the new picture fades in the way the first one did.
+   */
+  const regenerate = useCallback(async () => {
+    setRegenerating(true);
+    const done = await regenerateSessionImage(sessionId).catch(() => null);
+    if (done?.status === "ready") {
+      setLoaded(false);
+      setImage(done);
+    }
+    setRegenerating(false);
+  }, [sessionId]);
+
   if (!image) return null;
 
   // Out of automatic retries. The owner gets a way back — they're the only one
@@ -128,8 +149,11 @@ export default function SessionHeaderImage({
       {showImage && (
         // Not next/image: the bytes come from our own API route, which is
         // already immutable-cached, and the optimizer adds nothing here.
+        // The key is the versioned url, so a regenerated banner remounts and
+        // fires `load` again instead of silently reusing the old element.
         // eslint-disable-next-line @next/next/no-img-element
         <img
+          key={image.url}
           src={image.url}
           alt=""
           onLoad={() => setLoaded(true)}
@@ -140,7 +164,45 @@ export default function SessionHeaderImage({
       )}
 
       {!loaded && <BannerPlaceholder />}
+
+      {showImage && canGenerate && (
+        <RegenerateButton onClick={regenerate} busy={regenerating} />
+      )}
     </div>
+  );
+}
+
+/**
+ * Ask for a different picture of this session.
+ *
+ * Sits in the corner of the banner and stays quiet — it spends real inference
+ * and overwrites something the climber may well be happy with, so it reads as
+ * an afterthought rather than a call to action. Only shown to signed-in
+ * viewers, who are the only ones the server will accept it from.
+ */
+function RegenerateButton({ onClick, busy }: { onClick: () => void; busy: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={busy}
+      title={busy ? "Picturing this session again…" : "Generate a new image"}
+      aria-label="Generate a new image"
+      className="absolute bottom-2 right-2 rounded-lg border border-stone-700/70 bg-stone-950/60 p-1.5 text-stone-400 backdrop-blur-sm transition-colors hover:border-stone-600 hover:text-orange-400 disabled:cursor-not-allowed disabled:text-stone-500 disabled:hover:border-stone-700/70 disabled:hover:text-stone-500"
+    >
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`}
+      >
+        <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+        <path d="M13.5 2v3h-3" />
+      </svg>
+    </button>
   );
 }
 

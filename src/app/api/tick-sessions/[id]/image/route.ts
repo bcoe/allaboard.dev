@@ -47,15 +47,33 @@ type ImageStatus = "none" | "pending" | "ready" | "failed";
  * `canRetry` is what tells the page whether landing on it should kick off
  * another attempt. Keeping that decision on the server means the retry budget
  * lives in one place rather than being re-derived by every caller.
+ *
+ * `version` (the row's `updated_at`) is stamped onto the raw URL. The bytes are
+ * served `immutable`, so without it a regenerated banner would keep showing the
+ * old picture out of cache — for the person who pressed the button and, worse,
+ * for everyone who had already loaded the page.
  */
-function statusBody(sessionId: string, status: ImageStatus, attempts = 0) {
+function statusBody(
+  sessionId: string,
+  status: ImageStatus,
+  attempts = 0,
+  version?: number,
+) {
+  const raw = `/api/tick-sessions/${encodeURIComponent(sessionId)}/image/raw`;
   return {
     sessionId,
     status,
-    url: status === "ready" ? `/api/tick-sessions/${encodeURIComponent(sessionId)}/image/raw` : undefined,
+    url: status === "ready" ? (version ? `${raw}?v=${version}` : raw) : undefined,
     canRetry: status === "failed" && attempts < MAX_ATTEMPTS,
     attempts,
   };
+}
+
+/** Epoch-ms stamp for the cache-busting URL, tolerant of whatever pg returns. */
+function versionOf(updatedAt: unknown): number | undefined {
+  if (!updatedAt) return undefined;
+  const ms = new Date(updatedAt as string).getTime();
+  return Number.isFinite(ms) ? ms : undefined;
 }
 
 /**
@@ -82,11 +100,16 @@ export async function GET(
     const { id } = await params;
     const row = await db("session_images")
       .where({ session_id: id })
-      .select("status", "attempts")
+      .select("status", "attempts", "updated_at")
       .first();
 
     return NextResponse.json(
-      statusBody(id, (row?.status as ImageStatus) ?? "none", row?.attempts ?? 0),
+      statusBody(
+        id,
+        (row?.status as ImageStatus) ?? "none",
+        row?.attempts ?? 0,
+        versionOf(row?.updated_at),
+      ),
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
@@ -107,23 +130,28 @@ export async function GET(
  * `pending` row with `ON CONFLICT DO NOTHING`, so concurrent requests for the
  * same session cannot both generate. A session that already has an image is
  * returned as-is and never regenerated, even after new climbs are logged into
- * it.
+ * it — unless `?regenerate=1` asks for a new one outright.
  *
  * Failures are retryable but bounded. A `failed` row is reclaimed on the next
  * request while `attempts` remain (3), as is a `pending` row left stranded for
  * more than five minutes by a process that died mid-call. Once the budget is
  * spent the session is left alone and reports `canRetry: false`.
  *
- * @param req - Incoming request. No body. Query parameter:
+ * @param req - Incoming request. No body. Query parameters:
  *   - `retry=1` — the owner explicitly retrying an exhausted session; resets
  *     the attempt budget. Still subject to the `pending` lock, and ignored
  *     for anyone but the owner — otherwise a passer-by could spend a
  *     session's retry budget over and over.
+ *   - `regenerate=1` — replace a banner that is already `ready` with a fresh
+ *     one. Open to any authenticated caller, and likewise subject to the
+ *     `pending` lock. Applies only to `ready` rows; a `failed` one still
+ *     follows the `retry` rules above.
  * @param params - Route params. `id` is the session slug.
  *
  * @returns `{ sessionId, status, url?, canRetry, attempts }` — `ready` once
  *   the image is stored, `pending` if another request is already generating
- *   it, `failed` if this attempt (or the budget) ran out.
+ *   it, `failed` if this attempt (or the budget) ran out. The `url` carries a
+ *   `?v=` stamp so a regenerated banner is not served from cache.
  *
  * @returns `401` if not authenticated.
  * @returns `404` if the session does not exist.
@@ -155,7 +183,11 @@ export async function POST(
     // by every person who opens it.
     const force = req.nextUrl.searchParams.get("retry") === "1" && isOwner;
 
-    const claim = await claimGeneration(id, session.user_id, force);
+    // `?regenerate=1` is someone asking for a different picture of a session
+    // that already has one — the only way past the generate-once rule.
+    const regenerate = req.nextUrl.searchParams.get("regenerate") === "1";
+
+    const claim = await claimGeneration(id, session.user_id, { force, regenerate });
     if (claim.outcome !== "claimed") {
       // Already ready, mid-flight, or out of retries — never generate twice.
       Sentry.logger.info("Session image generation skipped", {
@@ -163,7 +195,7 @@ export async function POST(
         "image.attempts": claim.attempts,
       });
       const status: ImageStatus = claim.outcome === "exhausted" ? "failed" : claim.outcome;
-      return NextResponse.json(statusBody(id, status, claim.attempts));
+      return NextResponse.json(statusBody(id, status, claim.attempts, claim.version));
     }
 
     const ticks = await loadSessionTicks(session);
@@ -200,7 +232,7 @@ export async function POST(
       return NextResponse.json(statusBody(id, "failed", claim.attempts), { status: 502 });
     }
 
-    await db("session_images").where({ session_id: id }).update({
+    const [stored] = await db("session_images").where({ session_id: id }).update({
       status:     "ready",
       model:      banner.model,
       prompt:     banner.prompt,
@@ -208,17 +240,20 @@ export async function POST(
       data:       banner.bytes,
       error:      null,
       updated_at: db.fn.now(),
-    });
+    }).returning("updated_at");
 
     // Audit event: the actor may not be the session's owner, so record both —
     // who spent the inference, and whose session it bought a banner for.
     Sentry.logger.info("Session image stored", {
-      action: "create", resource: "session_image", "session.id": id,
-      owner: session.user_id, "image.by_owner": isOwner,
+      action: regenerate ? "update" : "create", resource: "session_image", "session.id": id,
+      owner: session.user_id, "image.by_owner": isOwner, "image.regenerated": regenerate,
       "ai.image_model": banner.model, "image.bytes": banner.bytes.length, outcome: "ready",
     });
 
-    return NextResponse.json(statusBody(id, "ready", claim.attempts), { status: 201 });
+    return NextResponse.json(
+      statusBody(id, "ready", claim.attempts, versionOf(stored?.updated_at) ?? Date.now()),
+      { status: 201 },
+    );
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Failed to generate image" }, { status: 500 });
@@ -235,12 +270,21 @@ export async function POST(
  * `ownerId` is the session's climber, not whoever triggered this request — the
  * row's `user_id` is what CASCADE-deletes the banner along with its account,
  * so it has to follow the session, not the passer-by who happened to open it.
+ *
+ * `regenerate` is the one way past the generate-once rule, and it applies to
+ * `ready` rows only. It deliberately does not rescue a `failed` one: that path
+ * has an attempt budget only the owner may reset, and letting any caller reset
+ * it under a different flag would be the same hole by another name.
  */
 async function claimGeneration(
   sessionId: string,
   ownerId: string,
-  force: boolean,
-): Promise<{ outcome: "claimed" | "ready" | "pending" | "exhausted"; attempts: number }> {
+  { force, regenerate }: { force: boolean; regenerate: boolean },
+): Promise<{
+  outcome: "claimed" | "ready" | "pending" | "exhausted";
+  attempts: number;
+  version?: number;
+}> {
   // First writer wins; everyone else falls through to the status read below.
   const inserted = await db("session_images")
     .insert({ session_id: sessionId, user_id: ownerId, status: "pending", attempts: 1 })
@@ -257,7 +301,36 @@ async function claimGeneration(
 
   // Row vanished between the two statements — race is harmless.
   if (!existing) return { outcome: "claimed", attempts: 1 };
-  if (existing.status === "ready") return { outcome: "ready", attempts: existing.attempts };
+
+  if (existing.status === "ready") {
+    if (!regenerate) {
+      return {
+        outcome: "ready",
+        attempts: existing.attempts,
+        version: versionOf(existing.updated_at),
+      };
+    }
+
+    // Taking over a finished banner. The `status = 'ready'` predicate is the
+    // lock: two people pressing regenerate at once, only one wins the row and
+    // the other is told it is already pending. The old bytes stay in `data`
+    // until the new ones overwrite them, so nothing is destroyed if this
+    // attempt fails. A fresh job gets a fresh attempt budget.
+    const taken = await db("session_images")
+      .where({ session_id: sessionId, status: "ready" })
+      .update({
+        status:     "pending",
+        user_id:    ownerId,
+        error:      null,
+        attempts:   1,
+        updated_at: db.fn.now(),
+      })
+      .returning("attempts");
+
+    return taken.length > 0
+      ? { outcome: "claimed", attempts: 1 }
+      : { outcome: "pending", attempts: existing.attempts };
+  }
 
   // A failed attempt is retryable while budget remains, and so is a pending
   // row whose generator clearly died. An explicit retry from the owner resets

@@ -805,9 +805,15 @@ paths:
           description: the owner explicitly retrying an exhausted session; resets
           schema:
             type: string
+        - name: regenerate=1
+          in: query
+          required: false
+          description: replace a banner that is already ready with a fresh
+          schema:
+            type: string
       responses:
         "200":
-          description: "{ sessionId, status, url?, canRetry, attempts } — ready once the image is stored, pending if another request is already generating it, failed if this attempt (or the budget) ran out."
+          description: "{ sessionId, status, url?, canRetry, attempts } — ready once the image is stored, pending if another request is already generating it, failed if this attempt (or the budget) ran out. The url carries a ?v= stamp so a regenerated banner is not served from cache."
         "401":
           description: not authenticated.
         "404":
