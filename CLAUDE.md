@@ -228,7 +228,7 @@ One AI-generated header banner per climbing session (see **Session Header Images
 |--------|------|-------|
 | session_id | text | primary key; the `tick_sessions` slug. **No FK** — see note below |
 | user_id | text | FK → users.id (CASCADE) |
-| status | text | `pending` \| `ready` \| `failed`; doubles as the generation lock |
+| status | text | `ready` \| `failed`. Only finished outcomes are written — a row exists because a generation ended, never because one started. `pending` is a client-facing status and a legacy value some rows still carry; see **Generate-once semantics** |
 | attempts | integer | generation attempts spent; capped at 3 before the session is left alone |
 | model | text | image model that produced `data` |
 | prompt | text | the generated image prompt (kept for debugging) |
@@ -465,6 +465,7 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | GET | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
 | POST | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
 | GET | `/api/tick-sessions/:id/image/raw` | `src/app/api/tick-sessions/[id]/image/raw/route.ts` |
+| POST | `/api/queues/session-image` | `src/app/api/queues/session-image/route.ts` — Vercel Queues consumer; private, never called by a browser |
 | GET | `/api/auth/me` | `src/app/api/auth/me/route.ts` |
 | POST | `/api/auth/logout` | `src/app/api/auth/logout/route.ts` |
 | GET | `/api/auth/google` | `src/app/api/auth/google/route.ts` |
@@ -607,13 +608,79 @@ Not all data is worth keeping. Use `beforeSend` / `beforeSendLog` to drop `debug
 
 ---
 
+## Background Jobs (Vercel Queues)
+
+Work too slow for a request lives in a queue. Right now that is exactly one job — session header images (~35s) — but the seam is general.
+
+| Piece | File |
+|---|---|
+| Producer + driver selection | `src/lib/server/imageQueue.ts` |
+| The job body | `src/lib/server/sessionImageJob.ts` |
+| Vercel push consumer | `src/app/api/queues/session-image/route.ts` |
+| Topic trigger | `vercel.json` → `functions.experimentalTriggers` |
+
+### Two drivers
+
+| Driver | When | Behaviour |
+|---|---|---|
+| `memory` | local dev (default off-Vercel) | Runs the job in-process, detached from the request. **No `vercel link`, no OIDC token, no queue credentials** — `npm run dev` alone exercises the whole feature. |
+| `vercel` | production (default when `process.env.VERCEL` is set) | `send()` to the `session-image` topic; Vercel invokes the push consumer. |
+
+`IMAGE_QUEUE_DRIVER=memory|vercel` overrides the choice in either direction — set it to `vercel` locally (after `vercel link && vercel env pull`) to test the real thing.
+
+Fire-and-forget is only safe in the `memory` driver: a local dev server keeps running after it responds, where a Vercel function can be frozen the instant it does. That asymmetry is the whole reason production needs a real queue rather than a detached promise.
+
+Both drivers call the **same** `runSessionImageJob`, so a bug cannot hide in a code path that only production takes.
+
+### Idempotency and deduplication
+
+Nothing durable is written to mark a job as running, so there is no state that can strand a session in "generating" (see **Generate-once semantics**). Deduplication is therefore best-effort, in three layers:
+
+1. **In-process** — `isGenerating()` short-circuits a refresh handled by the same instance.
+2. **Cross-instance** — the automatic path publishes with `idempotencyKey: session-image:<id>:a<attempts>`. Two page views read the same attempt number, so they agree on the key and the queue collapses them into one job. A *later* attempt (after a recorded failure) derives a different key and is allowed through, so a dedupe key can never block a retry. A `DuplicateMessageError` is treated as success, not failure — it is the intended outcome of a refresh.
+
+   > **Retention is part of this.** Vercel ties the dedupe window to the message's *lifetime*, so `retentionSeconds` is really two settings at once. It is set to **300s** rather than the 24h default: a job lost without recording a failure would leave `attempts` unchanged, so every later page view would recompute the same key and automatic generation would be deduped into silence for a day, recoverable only by the corner button. A five-minute window still collapses refreshes during a ~40s job (with room for the consumer's one retry) while letting the next visit try again.
+3. **The job itself** — `runSessionImageJob` re-reads the session and the current row, skips when a banner already exists, and finishes with an upsert. Two jobs racing is a documented worst case, not a bug: both render, the later write wins, nothing is corrupted.
+
+A deliberate press (`?regenerate=1`) publishes **without** a dedupe key — it should always run. The client keeps the button disabled until the job settles, which is what stops a mash from queuing five images.
+
+### Sentry tracing
+
+Both drivers emit the span pair from [Sentry's queues module conventions](https://docs.sentry.io/platforms/javascript/guides/nextjs/tracing/instrumentation/queues-module/):
+
+| Span | `op` | Attributes |
+|---|---|---|
+| Producer | `queue.publish` | `messaging.destination.name`, `messaging.message.id`, `messaging.message.body.size`, `messaging.system` |
+| Consumer | `queue.process` | the above plus `messaging.message.retry.count` (`deliveryCount - 1` — the first delivery is retry 0) and `messaging.message.receive.latency` (ms, from the broker's `createdAt` when available, else the payload's `enqueuedAt`) |
+
+Trace context travels **in the payload** (`sentryTrace` / `baggage`) rather than in message headers, because the `metadata` the SDK hands a consumer does not expose headers. The consumer calls `Sentry.continueTrace()` so its transaction is a child of the `queue.publish` span — a job's trace hangs off the page view that asked for it instead of being an orphan. Each message also gets a fresh `withIsolationScope`, so tags and breadcrumbs don't leak between jobs on a warm instance.
+
+`Sentry.flush(2000)` runs in the consumer's `finally`: a serverless instance can be frozen the moment the handler resolves, so spans have to be on the wire before then.
+
+### Retries
+
+Two independent budgets, deliberately:
+
+- **Per message** — `MAX_DELIVERIES = 2` in the consumer's `retry` callback (retry after 10s, then acknowledge and give up). Kept low because each delivery is a paid image and `renderWithRetry` already retries the model call once inside a single delivery.
+- **Per session** — `attempts` on the row, capped at `MAX_ATTEMPTS = 3`, bounding how many times *page loads* may queue new work for a session that keeps failing.
+
+### Deployment notes
+
+- **No environment variable is required in production.** The SDK authenticates via OIDC, which Vercel provides automatically on every deployment. Vercel Queues is in public beta on all plans, so nothing needs enabling in the dashboard, and topics are created implicitly on first publish — there is nothing to provision.
+- The consumer must be declared in `vercel.json` or it is never invoked. That entry is also what makes it **private** — no public URL, only the queue infrastructure can call it.
+- The `functions` key is a path glob relative to the project root, and **this project uses a `src/` directory**, so it must read `src/app/api/queues/…` rather than the `app/api/queues/…` shown in Vercel's docs. Get that wrong and the consumer is simply never invoked — jobs publish fine and nothing processes them.
+- Topics are **partitioned by deployment ID**: in push mode a message is delivered back to the deployment that published it. Message-schema changes are therefore safe across a rollout — a new deployment only ever consumes its own messages, and the old one drains independently.
+- `/api/queues/*` is exempt from rate limiting in `src/middleware.ts`. Callbacks arrive without a session cookie, so they would land in the shared anonymous IP bucket, and a 429 reads to the queue as a failed delivery and comes back as a retry.
+
+---
+
 ## Session Header Images
 
 Each climbing session permalink (`/user/:handle/sessions/:id`) carries a 1200×400 AI-generated banner: a visual read of what that session *felt* like, drawn from the climbs the climber logged and the notes they wrote.
 
 ### Pipeline
 
-Two model calls through the **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`), both in `src/lib/server/sessionImage.ts`:
+Two model calls through the **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`), both in `src/lib/server/sessionImage.ts`. The whole pipeline runs in a **background job**, never in the request that asked for it — see **Background Jobs** above:
 
 1. **Art direction** (`AI_PROMPT_MODEL`, default `anthropic/claude-sonnet-5`) — reads the session brief and writes a single image prompt. Three constraints live in the system prompt so nothing in the notes can dilute them: the **notes outrank the climb names** (a name may suggest a motif, but the notes decide the mood); **at least three specifics of the session** (a note's image, a name's motif, a grade, an attempt count, hours spent) must be woven into **one coherent scene** rather than a collage, so the banner is recognisably *this* session; and the image must contain **no text of any kind**.
 
@@ -631,9 +698,15 @@ Two model calls through the **Vercel AI Gateway** (`AI_GATEWAY_API_KEY`), both i
 
 ### Generate-once semantics
 
-A **successful** banner is generated once and never regenerated on its own, even after new climbs are logged into that session. `POST` claims the job by inserting a `pending` row with `ON CONFLICT DO NOTHING`, so concurrent page views can never both pay for an image.
+**Nothing is written to the database until an image exists.** This is the rule that keeps a session from getting stuck: every row in `session_images` describes a *finished* outcome — `ready` with bytes, or `failed` with a reason — so a job that dies leaves no trace at all and the next visit queues cleanly.
 
-The single exception is a deliberate press of the **regenerate** button in the banner's bottom-right corner (signed-in viewers only, `POST ?regenerate=1`). That takes over the `ready` row under a `WHERE status = 'ready'` predicate — the lock that makes two simultaneous presses produce one image. The old bytes stay in `data` until the new ones overwrite them, so a failed regeneration destroys nothing.
+> **Why:** `POST` used to claim its job by inserting a `pending` row *before* generating. That is durable state describing a running process, so when the process died the row stayed `pending` forever and the session showed "generating" with nothing behind it. A reclaim path existed (a `pending` row older than five minutes could be taken over) but was unreachable from the UI, because the client only ever *polled* on `pending` and never POSTed. Same shape as the original unreachable `failed` retry.
+>
+> A `pending` row can still be *read* — one left behind by that scheme — and is treated exactly like a failure: retryable, against the same budget. Nothing writes that state any more.
+
+Because no row marks work as in progress, `GET` reports `none` for the ~35s a job is running. The client treats that as "still working" rather than "missing" while it is waiting on a job it queued. Deduplication happens at the queue instead — see **Background Jobs** above.
+
+A **successful** banner is generated once and never regenerated on its own, even after new climbs are logged into that session. The single exception is a deliberate press of the **regenerate** button in the banner's bottom-right corner (signed-in viewers only, `POST ?regenerate=1`). The old bytes stay in `data` until the new ones overwrite them, so a failed regeneration destroys nothing.
 
 Because the raw bytes are served `immutable`, the status `url` carries a `?v=<updated_at epoch ms>` stamp. Without it a regenerated banner would keep showing the previous picture out of cache — for the person who pressed the button, and for everyone who had already loaded the page.
 
@@ -642,10 +715,12 @@ Because the raw bytes are served `immutable`, the status `url` carries a `?v=<up
 Image generation fails transiently — a malformed gateway response, an upstream 5xx. Recovery is bounded at three levels:
 
 1. **In-request** — `renderWithRetry` retries the image call once. The AI SDK retries its own retryable errors but treats a malformed response body as terminal, which is the failure seen in practice ("Invalid JSON response" after a full ~22s render). Worst case ~50s, inside the route's 60s budget.
-2. **Across visits** — a `failed` row is re-claimed and retried on the next page view while `attempts < MAX_ATTEMPTS` (3). A `pending` row stranded over five minutes by a dead process is reclaimed the same way. The server reports this as `canRetry` so the retry budget lives in one place.
-3. **Manual** — once the budget is spent the owner sees a quiet "Couldn't picture this session · Try again"; that button POSTs `?retry=1`, which resets `attempts` (it does *not* bypass the `pending` lock).
+2. **Across visits** — a `failed` row (or a stranded `pending` one) is retried on the next page view while `attempts < MAX_ATTEMPTS` (3). The server reports this as `canRetry` so the retry budget lives in one place. The client POSTs on `pending` as well as `none` and `failed`, which is what recovers a stranded session; that costs nothing when a generation really is running, because the in-flight guard answers `pending` without starting a second one.
+3. **Manual** — the corner button. Over a finished banner it asks for a different picture; over one that never arrived it asks again. Either way it POSTs `?regenerate=1`, which takes over a row in **any** state and is **not** capped by the attempt budget — a click is a deliberate act, where the budget exists to bound the automatic page-load retries. The owner additionally has `?retry=1` (owner-only) behind the "Couldn't picture this session · Try again" line, which resets `attempts`.
 
-> **Why bother:** the original design had no way back from `failed` — the client only POSTed when status was `none`, so a single transient flake left the session permanently blank with no feedback. The server's reclaim path existed but was unreachable.
+The client shows the placeholder while a generation is in flight and polls for up to `MAX_POLLS × POLL_MS` (~2 minutes). If that runs out with still no image it marks the banner **stalled**: the sweep animation stops, the caption becomes "No image yet.", and the corner button appears for signed-in viewers. An animation still running after the work has plainly stopped is a lie the button would have to argue with.
+
+> **Why bother:** the original design had no way back from `failed` — the client only POSTed when status was `none`, so a single transient flake left the session permanently blank with no feedback. The server's reclaim path existed but was unreachable. The same was true of a stranded `pending` row, which is what the no-write-until-complete rule above removes.
 
 Failures are stored via `describeError`, which flattens the AI SDK's status code, response body, and nested cause into one searchable line — bare `err.message` yields uninformative strings like "Invalid JSON response". The same failures go to Sentry tagged `feature: session_image`.
 
@@ -654,7 +729,7 @@ Failures are stored via `describeError`, which flattens the AI SDK's status code
 ### ACL
 
 - **Trigger generation** (`POST`): any authenticated user, for any session — a session earns its banner on the first visit by anyone signed in, not only its owner. Sign-in is still required because each call costs real inference and should be attributable to an account.
-- **Regenerate** (`POST ?regenerate=1`): any authenticated user. The only way past the generate-once rule — it takes over a `ready` row, resets `attempts`, and overwrites `data` when the new render lands. Deliberately scoped to `ready` rows only: a `failed` one still follows the retry rules below, so this cannot be used as an owner-check-free way to reset a spent budget. It is still subject to the `pending` lock, so two people pressing at once produce one image.
+- **Regenerate** (`POST ?regenerate=1`): any authenticated user. The only way past the generate-once rule, and the button behind both jobs — a different picture for a finished banner, another attempt for one that never arrived. It takes over a row in **any** state (`ready`, `failed`, or a stranded `pending`), resets `attempts`, and overwrites `data` when the new render lands. Not capped by the attempt budget: a press is deliberate, where the budget bounds the automatic page-load retries. Still deduplicated by the in-flight guard, so two people pressing at once produce one image (within one instance).
 - **Manual retry** (`POST ?retry=1`): the session owner only. The `attempts` cap is what stops a session that keeps failing from being retried by everyone who opens it, so only the owner may reset it; for anyone else the flag is ignored (treated as an ordinary POST). The "Try again" affordance is likewise rendered for the owner only.
 - **View** (`GET` status and `GET .../raw`): public, like the session itself. A signed-out visitor never triggers generation and renders nothing where a banner has yet to be made.
 - **Row ownership**: `session_images.user_id` is always the session's climber, never the visitor who triggered generation — that column is what CASCADE-deletes the banner with its account, so it has to follow the session.
@@ -665,7 +740,9 @@ Failures are stored via `describeError`, which flattens the AI SDK's status code
 
 The component POSTs when status is `none`, **or** when it is `failed` and the server still reports `canRetry` — that second case is what makes a transient failure heal itself on the next visit. A signed-out visitor never triggers generation and never sees a failure state; a missing banner simply renders nothing rather than an empty 400px frame.
 
-A signed-in viewer also gets a small regenerate button in the banner's bottom-right corner. It is styled to stay out of the way — it spends inference and overwrites a picture the climber may like — and the current banner **stays on screen** for the ~25s the call takes, since it is still the session's banner until a replacement actually arrives (and still is, if the render fails). The `<img>` is keyed on the versioned URL so the new bytes remount the element and re-fire `load`, giving the replacement the same fade-in as the original.
+A signed-in viewer also gets a small button in the banner's bottom-right corner. One control, two jobs: over a finished banner it asks for a different picture, and over a **stalled** one (polling ran out with no image) it asks again — same press, same position, only the label changes. It is styled to stay out of the way, since it spends inference and may overwrite a picture the climber likes.
+
+When replacing a finished banner the current one **stays on screen** for the ~25s the call takes, since it is still the session's banner until a replacement actually arrives (and still is, if the render fails). The `<img>` is keyed on the versioned URL so the new bytes remount the element and re-fire `load`, giving the replacement the same fade-in as the original.
 
 ---
 
@@ -894,5 +971,6 @@ Next.js automatically loads these files (in priority order, highest last):
 | `AI_PROMPT_MODEL` | optional | Overrides the art-direction model (default `anthropic/claude-sonnet-5`) |
 | `AI_IMAGE_MODEL` | optional | Overrides the image model (default `openai/gpt-image-2`) |
 | `AI_IMAGE_RENDER_SIZE` | optional | Size requested from the image model before cropping to 1200×400 (default `1536x1024`) |
+| `IMAGE_QUEUE_DRIVER` | optional | `memory` or `vercel`. Overrides the background-job driver; defaults to `vercel` on Vercel and `memory` everywhere else. **Nothing needs setting in production** — the queue SDK authenticates via OIDC automatically |
 
 `SESSION_SECRET` must also be added to Vercel Project → Settings → Environment Variables.

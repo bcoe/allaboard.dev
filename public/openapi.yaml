@@ -792,7 +792,7 @@ paths:
         "500":
           description: database error.
     post:
-      summary: Generate the header image for this session, if one does not already exist.
+      summary: Request a header image for this session, queuing the work in the background.
       parameters:
         - name: id
           in: path
@@ -808,22 +808,20 @@ paths:
         - name: regenerate=1
           in: query
           required: false
-          description: replace a banner that is already ready with a fresh
+          description: queue a job now, whatever state the session is in:
           schema:
             type: string
       responses:
         "200":
-          description: "{ sessionId, status, url?, canRetry, attempts } — ready once the image is stored, pending if another request is already generating it, failed if this attempt (or the budget) ran out. The url carries a ?v= stamp so a regenerated banner is not served from cache."
+          description: "{ sessionId, status, url?, canRetry, attempts } when there is nothing to do — ready if the banner already exists (url carries a ?v= stamp so a replacement is not served from cache), failed if the attempt budget is spent."
+        "202":
+          description: "{ sessionId, status: 'pending', canRetry, attempts, messageId } when a job is queued (or an identical one already was)."
         "401":
           description: not authenticated.
         "404":
           description: the session does not exist.
-        "422":
-          description: the session has no climbs to draw from.
         "500":
-          description: database error.
-        "502":
-          description: the image could not be generated.
+          description: the job could not be queued.
       security:
         - apiKeyAuth: []
         - cookieAuth: []

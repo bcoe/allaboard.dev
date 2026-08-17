@@ -23,6 +23,18 @@ const NAVIGATION_PREFIXES = [
   "/api/health",
 ];
 
+/**
+ * Queue consumers, invoked by Vercel's queue infrastructure rather than by a
+ * browser.
+ *
+ * Exempt from rate limiting as well as CORS. These have no public URL — the
+ * `experimentalTriggers` config in `vercel.json` makes them private — so the
+ * limiter protects nothing here, and it would actively hurt: callbacks arrive
+ * with no session cookie, so they land in the shared anonymous IP bucket, and a
+ * 429 reads to the queue as a failed delivery and comes back as a retry.
+ */
+const INTERNAL_PREFIXES = ["/api/queues/"];
+
 // UUID v4 format — used to detect API token query params for rate-limit bucketing.
 // Actual token validity is checked in route handlers via resolveUserId.
 const UUID_V4_RE =
@@ -125,6 +137,11 @@ function applyCORSHeaders(res: NextResponse, origin: string): void {
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // ── Internal queue consumers — no limiting, no CORS ─────────────────────────
+  if (INTERNAL_PREFIXES.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next();
+  }
 
   // ── Rate limiting (all routes) ──────────────────────────────────────────────
   const { key, limit } = getRateLimitKey(req);

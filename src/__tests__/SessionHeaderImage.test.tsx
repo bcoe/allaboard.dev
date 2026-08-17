@@ -86,11 +86,16 @@ describe("SessionHeaderImage", () => {
 
   it("shows the placeholder — not a stalled request — when generation is already in flight", async () => {
     mockGet.mockResolvedValue(state("pending"));
+    mockGenerate.mockReturnValue(new Promise(() => {}));
 
     render(<SessionHeaderImage sessionId={SESSION_ID} isOwner />);
 
     expect(await screen.findByText(PLACEHOLDER)).toBeInTheDocument();
-    expect(mockGenerate).not.toHaveBeenCalled();
+    // A `pending` row describes a request that died before writing an image —
+    // nothing writes that state any more — so the client asks again. The server
+    // answers `pending` without starting a second generation when one really is
+    // running, which is what makes this safe.
+    await waitFor(() => expect(mockGenerate).toHaveBeenCalledTimes(1));
   });
 
   it("retries automatically when a failed banner still has attempts left", async () => {

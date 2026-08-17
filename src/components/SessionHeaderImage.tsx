@@ -6,7 +6,12 @@
  * Lifecycle, from the client's point of view:
  *
  *   - `ready`   → show the image (fades in once decoded).
- *   - `pending` → another tab or request is generating; poll until it settles.
+ *   - `pending` → a generation is in flight elsewhere; poll until it settles.
+ *                 A signed-in viewer also POSTs, which is what recovers a
+ *                 session left `pending` by the scheme that wrote that row
+ *                 before generating: the server no longer writes one, so a
+ *                 `pending` read from the database describes a request that
+ *                 died rather than one that is running.
  *   - `none`    → if the viewer is signed in, ask the server to generate one —
  *                 their own session or anyone else's. A session earns its
  *                 banner on whichever visit gets there first. Signed-out
@@ -23,6 +28,10 @@
  * shown at most once per session in the happy path. Signed-in viewers get a
  * quiet corner button to ask for a different picture; that is the only path
  * that replaces an image the session already has.
+ *
+ * If polling runs out with still no image, the placeholder keeps the same
+ * corner button — a session that looks wedged is one press from another
+ * attempt, rather than something to wait out.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -50,99 +59,194 @@ export default function SessionHeaderImage({
   const canGenerate = isOwner || isLoggedIn;
 
   const [image, setImage] = useState<SessionImage | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [retrying, setRetrying] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
-  // Generation is a side effect with a cost; StrictMode double-mounts in dev
-  // would otherwise fire it twice (the server dedupes too, but not paying for
-  // the round trip is better).
+  /**
+   * The url whose bytes have decoded.
+   *
+   * Not a bare `loaded` boolean: the loading state has to be a property of the
+   * *current* picture, not a free-floating flag. When a settle left the url
+   * unchanged, resetting a boolean put the placeholder back up over an image
+   * that had already loaded — and since the <img> never remounted, `load` never
+   * fired again and nothing ever took it down.
+   */
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  /** A press of the corner button is in progress, job and all. */
+  const [working, setWorking] = useState(false);
+  /** Waiting gave up with no image — the banner looks wedged. */
+  const [stalled, setStalled] = useState(false);
+  // Asking is a side effect with a cost; StrictMode double-mounts in dev would
+  // otherwise fire it twice (the server dedupes too, but not paying for the
+  // round trip is better).
   const requested = useRef(false);
+  // Set on unmount so nothing below writes state into a dead component.
+  //
+  // Reset on *mount* as well, and declared before the effect that reads it so it
+  // runs first. React's development double-invoke mounts, unmounts and mounts
+  // again, and refs survive that — a flag that only ever flipped to true would
+  // leave the second mount permanently cancelled, so the banner rendered nothing
+  // at all under `next dev` while working fine in production.
+  const gone = useRef(false);
+  useEffect(() => {
+    gone.current = false;
+    return () => { gone.current = true };
+  }, []);
+
+  /**
+   * Waits for a queued job to produce something.
+   *
+   * `none` counts as "still working": no row is written until the job finishes,
+   * so an absent row during this window means the job is running, not missing.
+   *
+   * `replacing` is the url of the banner this job is about to overwrite, and it
+   * matters for the same reason. Regenerating is the one case where a good row
+   * already exists while a job runs — the status stays `ready`, pointing at the
+   * old picture, for the whole ~35s. Without a baseline to compare against, the
+   * first poll would accept that stale row and stop waiting 4s after the press.
+   *
+   * Returns the settled state, or null if the wait ran out.
+   */
+  const awaitJob = useCallback(
+    async (replacing?: string): Promise<SessionImage | null> => {
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise((r) => setTimeout(r, POLL_MS));
+        if (gone.current) return null;
+
+        const next = await getSessionImage(sessionId).catch(() => null);
+        if (!next) continue;
+
+        // Still working: no row yet, or one left behind by a dead request.
+        if (next.status === "none" || next.status === "pending") continue;
+        // The picture being replaced, not the replacement. The url carries the
+        // row's updated_at, so an unchanged url means unchanged bytes.
+        if (next.status === "ready" && replacing && next.url === replacing) continue;
+
+        return next;
+      }
+      return null;
+    },
+    [sessionId],
+  );
+
+  /**
+   * Applies whatever a job produced, or marks the banner wedged.
+   *
+   * Nothing to do about the loading state here — it is derived from whether the
+   * url on screen has decoded, so a new url shows the placeholder and fades in
+   * on its own, and an unchanged one is left alone.
+   */
+  const applySettled = useCallback((settled: SessionImage | null) => {
+    if (gone.current) return;
+    if (settled) setImage(settled);
+    else setStalled(true);
+  }, []);
+
+  /**
+   * Resolves what a request produced: the outcome itself if the server had
+   * nothing to queue, otherwise whatever the job eventually writes.
+   *
+   * `null` means the request never landed, so there is no job to wait for —
+   * polling two minutes for one that was never queued would leave the button
+   * disabled for no reason.
+   */
+  const settle = useCallback(
+    async (queued: SessionImage | null, replacing?: string): Promise<SessionImage | null> => {
+      if (!queued) return null;
+      return queued.status === "pending" ? awaitJob(replacing) : queued;
+    },
+    [awaitJob],
+  );
 
   useEffect(() => {
     if (!sessionId) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let polls = 0;
 
-    async function settle(state: SessionImage) {
-      if (cancelled) return;
-      setImage(state);
+    void (async () => {
+      const first = await getSessionImage(sessionId).catch(() => null);
+      if (!first || gone.current) return;
+      setImage(first);
 
-      // A fresh session, or a failed one the server is still willing to retry.
-      const shouldGenerate =
-        state.status === "none" || (state.status === "failed" && state.canRetry);
+      // A fresh session; one reading `pending` from a job that died before
+      // writing an image; or a failed one the server will still retry.
+      const shouldRequest =
+        first.status === "none" ||
+        first.status === "pending" ||
+        (first.status === "failed" && first.canRetry);
 
-      if (shouldGenerate && canGenerate && !requested.current) {
-        requested.current = true;
-        // Held open for the whole pipeline (~30s); the placeholder covers it.
-        const done = await generateSessionImage(sessionId).catch(
-          () => ({ sessionId, status: "failed", canRetry: false }) as SessionImage,
-        );
-        if (!cancelled) setImage(done);
+      if (!shouldRequest || !canGenerate || requested.current) {
+        // Not ours to start. Wait anyway when a job is in flight — someone
+        // else's, or one an earlier mount of this component already asked for.
+        // Without that second case a remount sits on a stale `none` forever
+        // while the job it started finishes behind it.
+        if (first.status === "pending" || (requested.current && canGenerate)) {
+          applySettled(await awaitJob());
+        }
         return;
       }
 
-      if (state.status === "pending" && polls < MAX_POLLS) {
-        polls += 1;
-        timer = setTimeout(() => {
-          void getSessionImage(sessionId).then(settle).catch(() => {});
-        }, POLL_MS);
-      }
-    }
+      requested.current = true;
+      const queued = await generateSessionImage(sessionId).catch(() => null);
+      if (gone.current) return;
 
-    void getSessionImage(sessionId).then(settle).catch(() => {});
+      // Show the queued state first, so the placeholder covers the wait rather
+      // than the page sitting on a stale `none`.
+      if (queued?.status === "pending") setImage(queued);
+      applySettled(await settle(queued));
+    })();
+  }, [sessionId, canGenerate, awaitJob, applySettled, settle]);
 
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [sessionId, canGenerate]);
+  // The banner currently on screen, if any — the baseline a replacement job is
+  // measured against.
+  const currentUrl = image?.status === "ready" ? image.url : undefined;
 
   /** Explicit retry after the automatic budget ran out — resets it server-side. */
   const retry = useCallback(async () => {
-    setRetrying(true);
-    const done = await generateSessionImage(sessionId, true).catch(
-      () => ({ sessionId, status: "failed", canRetry: false }) as SessionImage,
-    );
-    setImage(done);
-    setRetrying(false);
-  }, [sessionId]);
+    setWorking(true);
+    setStalled(false);
+    const queued = await generateSessionImage(sessionId, true).catch(() => null);
+    applySettled(await settle(queued, currentUrl));
+    if (!gone.current) setWorking(false);
+  }, [sessionId, settle, applySettled, currentUrl]);
 
   /**
-   * Trade this banner for a different one.
+   * Ask for a different picture, or for another go at one that never arrived.
    *
-   * The current image stays on screen for the ~25s the call takes: it is still
-   * the session's banner until the replacement actually arrives, and if the
-   * render fails it still is. `loaded` resets only once new bytes are in hand,
-   * so the new picture fades in the way the first one did.
+   * The current banner stays on screen for the whole job: it is still the
+   * session's banner until a replacement actually arrives, and if the render
+   * fails it still is. `working` holds through the job rather than just the
+   * enqueue, so the button cannot be pressed into queuing five images.
    */
   const regenerate = useCallback(async () => {
-    setRegenerating(true);
-    const done = await regenerateSessionImage(sessionId).catch(() => null);
-    if (done?.status === "ready") {
-      setLoaded(false);
-      setImage(done);
-    }
-    setRegenerating(false);
-  }, [sessionId]);
+    setWorking(true);
+    setStalled(false);
+    const queued = await regenerateSessionImage(sessionId).catch(() => null);
+    applySettled(await settle(queued, currentUrl));
+    if (!gone.current) setWorking(false);
+  }, [sessionId, settle, applySettled, currentUrl]);
 
   if (!image) return null;
 
   // Out of automatic retries. The owner gets a way back — they're the only one
   // the server lets reset the budget; everyone else gets the page exactly as it
   // was before, with no broken-looking gap.
-  if (image.status === "failed" && !image.canRetry && !retrying) {
+  if (image.status === "failed" && !image.canRetry && !working) {
     return isOwner ? <BannerFailed onRetry={retry} /> : null;
   }
 
   // Nothing to show and no one here to make it: render nothing rather than an
-  // empty 400px frame waiting on a generation that isn't coming. (A `pending`
-  // session still shows the placeholder — someone else's image is on its way.)
+  // empty 400px frame waiting on a generation that isn't coming. A signed-out
+  // viewer gets the same treatment once a banner has visibly given up — the
+  // press that would fix it is not one they can make.
   const awaitingGeneration =
-    image.status === "none" || (image.status === "failed" && image.canRetry);
+    image.status === "none" ||
+    (image.status === "failed" && image.canRetry) ||
+    (image.status === "pending" && stalled);
   if (awaitingGeneration && !canGenerate) return null;
 
   const showImage = image.status === "ready" && image.url;
+  // The placeholder covers the banner until *this* picture has decoded, so a
+  // replacement fades in on its own and an unchanged one is never re-covered.
+  const loaded = !!showImage && loadedUrl === image.url;
+  // Offered over a finished banner (a different picture) and over one that
+  // never arrived (another attempt) — the same press either way.
+  const canPress = canGenerate && (showImage || stalled);
 
   return (
     <div className="relative mt-4 w-full aspect-[3/1] overflow-hidden rounded-xl border border-stone-700 bg-stone-900">
@@ -156,37 +260,53 @@ export default function SessionHeaderImage({
           key={image.url}
           src={image.url}
           alt=""
-          onLoad={() => setLoaded(true)}
+          onLoad={() => setLoadedUrl(image.url ?? null)}
           className={`h-full w-full object-cover transition-opacity duration-700 ${
             loaded ? "opacity-100" : "opacity-0"
           }`}
         />
       )}
 
-      {!loaded && <BannerPlaceholder />}
+      {!loaded && <BannerPlaceholder stalled={stalled && !working} />}
 
-      {showImage && canGenerate && (
-        <RegenerateButton onClick={regenerate} busy={regenerating} />
+      {canPress && (
+        <RegenerateButton
+          onClick={regenerate}
+          busy={working}
+          label={showImage ? "Generate a new image" : "Try generating this image again"}
+        />
       )}
     </div>
   );
 }
 
 /**
- * Ask for a different picture of this session.
+ * Ask for a(nother) picture of this session.
  *
  * Sits in the corner of the banner and stays quiet — it spends real inference
- * and overwrites something the climber may well be happy with, so it reads as
- * an afterthought rather than a call to action. Only shown to signed-in
- * viewers, who are the only ones the server will accept it from.
+ * and may overwrite something the climber is happy with, so it reads as an
+ * afterthought rather than a call to action. Only shown to signed-in viewers,
+ * who are the only ones the server will accept it from.
+ *
+ * The same control does both jobs: over a finished banner it asks for a
+ * different picture, and over one that never arrived it asks again. The wording
+ * changes; the press does not.
  */
-function RegenerateButton({ onClick, busy }: { onClick: () => void; busy: boolean }) {
+function RegenerateButton({
+  onClick,
+  busy,
+  label,
+}: {
+  onClick: () => void;
+  busy: boolean;
+  label: string;
+}) {
   return (
     <button
       onClick={onClick}
       disabled={busy}
-      title={busy ? "Picturing this session again…" : "Generate a new image"}
-      aria-label="Generate a new image"
+      title={busy ? "Picturing this session again…" : label}
+      aria-label={label}
       className="absolute bottom-2 right-2 rounded-lg border border-stone-700/70 bg-stone-950/60 p-1.5 text-stone-400 backdrop-blur-sm transition-colors hover:border-stone-600 hover:text-orange-400 disabled:cursor-not-allowed disabled:text-stone-500 disabled:hover:border-stone-700/70 disabled:hover:text-stone-500"
     >
       <svg
@@ -209,13 +329,21 @@ function RegenerateButton({ onClick, busy }: { onClick: () => void; busy: boolea
 /**
  * The loading state: a dim stone field with a slow warm sweep, sized exactly
  * like the finished banner so the page doesn't shift when it arrives.
+ *
+ * Once `stalled`, the sweep stops and the wording changes. An animation that
+ * keeps running after the work has plainly stopped is a lie the corner button
+ * has to argue with.
  */
-function BannerPlaceholder() {
+function BannerPlaceholder({ stalled = false }: { stalled?: boolean }) {
   return (
     <div className="absolute inset-0 bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 overflow-hidden">
-      <div className="absolute inset-y-0 -left-1/3 w-1/3 bg-gradient-to-r from-transparent via-orange-500/10 to-transparent animate-banner-sweep" />
+      {!stalled && (
+        <div className="absolute inset-y-0 -left-1/3 w-1/3 bg-gradient-to-r from-transparent via-orange-500/10 to-transparent animate-banner-sweep" />
+      )}
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="text-stone-600 text-xs tracking-wide">Picturing your session…</span>
+        <span className="text-stone-600 text-xs tracking-wide">
+          {stalled ? "No image yet." : "Picturing your session…"}
+        </span>
       </div>
     </div>
   );

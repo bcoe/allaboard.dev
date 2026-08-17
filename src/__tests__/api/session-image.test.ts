@@ -3,14 +3,18 @@
  *
  * ACL + contract tests for the session header-image endpoints:
  *   - GET  /api/tick-sessions/[id]/image      (public status probe)
- *   - POST /api/tick-sessions/[id]/image      (generation; any signed-in user)
+ *   - POST /api/tick-sessions/[id]/image      (queues a job; any signed-in user)
  *   - GET  /api/tick-sessions/[id]/image/raw  (public bytes)
  *
- * Generation costs real inference, so what matters most here and is pinned
- * below: it takes an account (never anonymous), a session that already has an
- * image is never regenerated, and the retry budget can only be reset by the
- * session's owner. Any signed-in climber may make a *missing* banner, for
- * their own session or anyone else's.
+ * The POST handler renders nothing — it decides whether work is warranted and
+ * hands a job to the queue, so the queue is mocked here and what the job does
+ * is covered by `src/__tests__/lib/sessionImageJob.test.ts`.
+ *
+ * Each job costs real inference, so what matters most here and is pinned below:
+ * it takes an account (never anonymous), a session that already has an image is
+ * never queued again, a refresh collapses onto the job already queued, and the
+ * retry budget can only be reset by the session's owner. Any signed-in climber
+ * may ask for a *missing* banner, on their own session or anyone else's.
  */
 
 import { NextRequest } from "next/server";
@@ -32,29 +36,28 @@ jest.mock("@/lib/server/db", () => {
   });
   return { __esModule: true, default: fn };
 });
-jest.mock("@/lib/server/sessionImage", () => ({
+jest.mock("@/lib/server/imageQueue", () => ({
   __esModule: true,
-  generateSessionBanner: jest.fn(),
-  // The route uses the real flattener to build the stored error string.
-  describeError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+  enqueueSessionImage: jest.fn(),
+  isGenerating: jest.fn(() => false),
 }));
 
 import db from "@/lib/server/db";
 import { getIronSession } from "iron-session";
-import { generateSessionBanner } from "@/lib/server/sessionImage";
+import { enqueueSessionImage, isGenerating } from "@/lib/server/imageQueue";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockDb = db as jest.MockedFunction<any>;
 const mockGetIronSession = jest.mocked(getIronSession);
-const mockGenerate = jest.mocked(generateSessionBanner);
+const mockEnqueue = jest.mocked(enqueueSessionImage);
+const mockIsGenerating = jest.mocked(isGenerating);
 
 /**
  * Chainable + thenable query-builder stub.
  *
- * Self-contained rather than the shared `qb` helper because this route uses
- * `andWhere`, and needs `insert(...).onConflict(...).ignore().returning(...)`
- * and `update(...).returning(...)` to resolve to arrays (the claim protocol
- * reads their length).
+ * Self-contained rather than the shared `qb` helper because these routes use
+ * `andWhere`, and need `insert(...).onConflict(...).merge().returning(...)` to
+ * resolve to an array.
  */
 function b(opts: {
   first?: unknown;
@@ -67,7 +70,7 @@ function b(opts: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const q: Record<string, any> = {};
 
-  for (const m of ["where", "andWhere", "orWhere", "join", "leftJoin", "orderBy", "select", "onConflict", "ignore"]) {
+  for (const m of ["where", "andWhere", "orWhere", "join", "leftJoin", "orderBy", "select", "onConflict", "ignore", "merge"]) {
     q[m] = jest.fn().mockReturnThis();
   }
 
@@ -97,20 +100,26 @@ const sessionRow = {
   tick_count: 2, sent_count: 1, hardest_grade: "V6", total_minutes: 45,
 };
 
-const tickRow = {
-  id: "tick-1", climb_id: "climb-1", climb_name: "Argh", grade: "V6",
-  board_name: "Kilter Board (Original)", angle: 40,
-  date: "2026-10-05T18:10:00.000Z", sent: true, rating: 4,
-  comment: "What a triumph.", suggested_grade: null, instagram_url: null,
-  attempts: 12, duration_minutes: 40, created_at: "2026-10-05T18:10:00.000Z",
-};
+/** Stored image bytes, for the raw-bytes route. */
+const banner = { bytes: Buffer.from([0xff, 0xd8, 0xff]) };
 
-const banner = {
-  prompt: "a dim stone wall",
-  model: "bfl/flux-2-max",
-  mimeType: "image/jpeg",
-  bytes: Buffer.from([0xff, 0xd8, 0xff]),
-};
+/**
+ * Routes each `db("<table>")` call to a builder by table name.
+ *
+ * The POST handler used to be tested with an ordered queue of builders, one per
+ * statement. That coupled every test to the exact sequence of the claim
+ * protocol, so removing the protocol broke all of them at once. Dispatching by
+ * table says what each table answers and leaves the handler free to ask in
+ * whatever order it likes.
+ */
+function dispatch(map: Record<string, Record<string, unknown>>) {
+  mockDb.mockImplementation((table: string) => {
+    const name = table.split(" ")[0]; // "ticks as t" → "ticks"
+    const builder = map[name];
+    if (!builder) throw new Error(`test did not expect a query against "${table}"`);
+    return builder;
+  });
+}
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 
@@ -122,6 +131,8 @@ beforeEach(() => {
   // clearAllMocks does NOT drain mockReturnValueOnce queues — without this a
   // test that consumes fewer builders than it queued leaks them into the next.
   mockDb.mockReset();
+  mockIsGenerating.mockReturnValue(false);
+  mockEnqueue.mockResolvedValue({ messageId: "msg-1", deduped: false, driver: "memory" });
 });
 
 // ── GET /api/tick-sessions/[id]/image ─────────────────────────────────────────
@@ -162,250 +173,192 @@ describe("GET /api/tick-sessions/[id]/image — status", () => {
 });
 
 // ── POST /api/tick-sessions/[id]/image ────────────────────────────────────────
+//
+// The route no longer renders anything: it decides whether work is warranted
+// and puts a job on the queue. What the job itself does is covered by
+// src/__tests__/lib/sessionImageJob.test.ts.
+
+/** The timestamp a stored row reports back, for the cache-busting url. */
+const UPDATED = new Date("2026-08-17T12:00:00.000Z");
+
+/** Builders for a session plus its current image row. Assert against `.images`. */
+function scene(existing?: Record<string, unknown>, id: string = SESSION_ID) {
+  const images = b({ first: existing, inserted: [{ updated_at: UPDATED }] });
+  dispatch({
+    tick_sessions: b({ first: { ...sessionRow, id } }),
+    session_images: images,
+  });
+  return { images };
+}
+
+const READY_ROW = { status: "ready", attempts: 1, updated_at: UPDATED };
+
+/** The job argument of the Nth enqueue call. */
+const jobOf = (n = 0) => mockEnqueue.mock.calls[n][0];
+/** The options argument of the Nth enqueue call. */
+const optsOf = (n = 0) => mockEnqueue.mock.calls[n][1] ?? {};
 
 describe("POST /api/tick-sessions/[id]/image — access control", () => {
   it("returns 401 when unauthenticated", async () => {
     mockGetIronSession.mockResolvedValue(unauthSession() as never);
     const res = await POST(req("POST"), params(SESSION_ID));
     expect(res.status).toBe(401);
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 
-  it("lets a signed-in visitor generate a banner for someone else's session", async () => {
+  it("queues a banner for someone else's session on a signed-in visit", async () => {
     mockGetIronSession.mockResolvedValue(authSession("bob") as never);
-    mockGenerate.mockResolvedValue(banner);
-
-    const store = b({ inserted: [{ session_id: SESSION_ID }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow })) // owned by alice
-      .mockReturnValueOnce(store)                    // claim insert
-      .mockReturnValueOnce(b({ rows: [tickRow] }))   // session ticks
-      .mockReturnValueOnce(store);                   // store result
+    scene(); // session owned by alice
 
     const res = await POST(req("POST"), params(SESSION_ID));
-    expect(res.status).toBe(201);
-    expect(mockGenerate).toHaveBeenCalledTimes(1);
-
-    // The row belongs to the session's climber, never the passer-by who paid
-    // for it: user_id is the FK that CASCADE-deletes the banner along with an
-    // account, so pointing it at bob would take alice's banner with him.
-    expect(store.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ session_id: SESSION_ID, user_id: "alice" }),
-    );
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ status: "pending" });
+    expect(jobOf()).toMatchObject({ sessionId: SESSION_ID, requestedBy: "bob" });
   });
 
   it("returns 404 when the session does not exist", async () => {
     mockGetIronSession.mockResolvedValue(authSession("alice") as never);
-    mockDb.mockReturnValueOnce(b({ first: undefined }));
+    dispatch({ tick_sessions: b({ first: undefined }) });
     expect((await POST(req("POST"), params(SESSION_ID))).status).toBe(404);
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 });
 
-describe("POST /api/tick-sessions/[id]/image — generation", () => {
+describe("POST /api/tick-sessions/[id]/image — queuing", () => {
   beforeEach(() => mockGetIronSession.mockResolvedValue(authSession("alice") as never));
 
-  it("generates and stores an image for the owner", async () => {
-    mockGenerate.mockResolvedValue(banner);
-
-    const store = b({ inserted: [{ session_id: SESSION_ID }] }); // claim succeeds
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow })) // tick_sessions lookup
-      .mockReturnValueOnce(store)                    // claim insert
-      .mockReturnValueOnce(b({ rows: [tickRow] }))   // session ticks
-      .mockReturnValueOnce(store);                   // store result
-
+  it("returns without waiting for the image", async () => {
+    // 202, not 201: the work is accepted, not done. Generation takes 30–40s,
+    // which is why it is not on this request's clock at all.
+    scene();
     const res = await POST(req("POST"), params(SESSION_ID));
-    expect(res.status).toBe(201);
-    expect(await res.json()).toMatchObject({ status: "ready" });
 
-    expect(mockGenerate).toHaveBeenCalledTimes(1);
-    // The notes must reach the generator — they are what the image is drawn from.
-    expect(mockGenerate.mock.calls[0][1][0].comment).toBe("What a triumph.");
-    expect(store.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "ready", mime_type: "image/jpeg", data: banner.bytes }),
-    );
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ status: "pending", messageId: "msg-1" });
   });
 
-  it("does not regenerate a session that already has an image", async () => {
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))                  // session lookup
-      .mockReturnValueOnce(b({ inserted: [] }))                       // claim loses the conflict
-      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: new Date() } }));
+  it("writes nothing to the database", async () => {
+    const { images } = scene();
+    await POST(req("POST"), params(SESSION_ID));
+
+    // No claim row, no placeholder — the job writes only once it has bytes.
+    expect(images.insert).not.toHaveBeenCalled();
+    expect(images.update).not.toHaveBeenCalled();
+  });
+
+  it("makes a refresh ride along with the job already queued", async () => {
+    // Two page views read the same attempt number, so they agree on the dedupe
+    // key and the queue collapses them into one job.
+    scene();
+    await POST(req("POST"), params(SESSION_ID));
+    await POST(req("POST"), params(SESSION_ID));
+
+    expect(optsOf(0).dedupeKey).toBe(`session-image:${SESSION_ID}:a1`);
+    expect(optsOf(1).dedupeKey).toBe(optsOf(0).dedupeKey);
+  });
+
+  it("uses a different key for a later attempt so a failure can be retried", async () => {
+    scene({ status: "failed", attempts: 1 });
+    await POST(req("POST"), params(SESSION_ID));
+
+    expect(jobOf().attempts).toBe(2);
+    expect(optsOf().dedupeKey).toBe(`session-image:${SESSION_ID}:a2`);
+  });
+
+  it("reports in-flight work in this process without queuing again", async () => {
+    mockIsGenerating.mockReturnValue(true);
+    scene();
+
+    const res = await POST(req("POST"), params(SESSION_ID));
+    expect(await res.json()).toMatchObject({ status: "pending" });
+    expect(mockEnqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not queue anything for a session that already has an image", async () => {
+    scene(READY_ROW);
 
     const res = await POST(req("POST"), params(SESSION_ID));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ status: "ready" });
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 
-  it("reports 'pending' without generating when another request holds the claim", async () => {
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(b({ inserted: [] }))
-      .mockReturnValueOnce(b({ first: { status: "pending", attempts: 1, updated_at: new Date() } }))
-      .mockReturnValueOnce(b({ updated: [] })); // too fresh to reclaim
+  it("leaves a session alone once its attempts are spent", async () => {
+    scene({ status: "failed", attempts: 3 });
 
     const res = await POST(req("POST"), params(SESSION_ID));
-    expect(await res.json()).toMatchObject({ status: "pending" });
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ status: "failed", canRetry: false, attempts: 3 });
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 
-  it("returns 422 and releases the claim when the session has no climbs", async () => {
-    const store = b({ inserted: [{ session_id: SESSION_ID }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ rows: [] })) // no ticks in the window
-      .mockReturnValueOnce(store);
+  it("picks up a session stranded mid-generation by a dead request", async () => {
+    // A leftover 'pending' row from the scheme that wrote one before generating.
+    scene({ status: "pending", attempts: 1 });
 
-    const res = await POST(req("POST"), params(SESSION_ID));
-    expect(res.status).toBe(422);
-    expect(store.delete).toHaveBeenCalled();
-    expect(mockGenerate).not.toHaveBeenCalled();
-  });
-
-  it("marks the row failed (502) when the model call throws", async () => {
-    mockGenerate.mockRejectedValue(new Error("gateway exploded"));
-
-    const store = b({ inserted: [{ session_id: SESSION_ID }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ rows: [tickRow] }))
-      .mockReturnValueOnce(store);
-
-    const res = await POST(req("POST"), params(SESSION_ID));
-    expect(res.status).toBe(502);
-    expect(store.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "failed", error: "gateway exploded" }),
-    );
+    expect((await POST(req("POST"), params(SESSION_ID))).status).toBe(202);
+    expect(jobOf().attempts).toBe(2);
   });
 });
 
 // ── Regeneration ──────────────────────────────────────────────────────────────
-//
-// The one way past the generate-once rule. It replaces a finished banner, so
-// what matters is that it takes an explicit ask, that it cannot be used to
-// dodge the retry budget, and that the replacement is not masked by the cached
-// copy of the picture it replaced.
 
 describe("POST /api/tick-sessions/[id]/image?regenerate=1", () => {
-  const UPDATED = new Date("2026-08-15T12:00:00.000Z");
-
-  const regenReq = () =>
+  const regenReq = (id: string = SESSION_ID) =>
     new NextRequest(
-      `http://localhost/api/tick-sessions/${SESSION_ID}/image?regenerate=1`,
+      `http://localhost/api/tick-sessions/${id}/image?regenerate=1`,
       { method: "POST" },
     );
 
-  it("replaces a finished banner when asked outright", async () => {
+  it("queues a replacement for a finished banner", async () => {
     mockGetIronSession.mockResolvedValue(authSession("alice") as never);
-    mockGenerate.mockResolvedValue(banner);
+    scene(READY_ROW);
 
-    const store = b({ inserted: [], updated: [{ attempts: 1, updated_at: UPDATED }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))                                   // session lookup
-      .mockReturnValueOnce(store)                                                      // claim insert loses
-      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }))
-      .mockReturnValueOnce(store)                                                      // take over the ready row
-      .mockReturnValueOnce(b({ rows: [tickRow] }))                                     // session ticks
-      .mockReturnValueOnce(store);                                                     // store result
-
-    const res = await POST(regenReq(), params(SESSION_ID));
-    expect(res.status).toBe(201);
-    expect(mockGenerate).toHaveBeenCalledTimes(1);
-    expect(store.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "ready", data: banner.bytes }),
-    );
+    expect((await POST(regenReq(), params(SESSION_ID))).status).toBe(202);
+    expect(jobOf()).toMatchObject({ sessionId: SESSION_ID, regenerate: true });
   });
 
-  it("stamps the new bytes with a fresh url so caches cannot serve the old picture", async () => {
+  it("sends no dedupe key — a deliberate press always runs", async () => {
     mockGetIronSession.mockResolvedValue(authSession("alice") as never);
-    mockGenerate.mockResolvedValue(banner);
+    scene(READY_ROW);
 
-    const store = b({ inserted: [], updated: [{ attempts: 1, updated_at: UPDATED }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }))
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ rows: [tickRow] }))
-      .mockReturnValueOnce(store);
-
-    const body = await (await POST(regenReq(), params(SESSION_ID))).json();
-    expect(body.url).toBe(
-      `/api/tick-sessions/${SESSION_ID}/image/raw?v=${UPDATED.getTime()}`,
-    );
+    await POST(regenReq(), params(SESSION_ID));
+    expect(optsOf().dedupeKey).toBeUndefined();
   });
 
   it("is available to any signed-in climber, not just the session's owner", async () => {
     mockGetIronSession.mockResolvedValue(authSession("bob") as never);
-    mockGenerate.mockResolvedValue(banner);
+    scene(READY_ROW); // owned by alice
 
-    const store = b({ inserted: [], updated: [{ attempts: 1, updated_at: UPDATED }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))                                   // owned by alice
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }))
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ rows: [tickRow] }))
-      .mockReturnValueOnce(store);
-
-    expect((await POST(regenReq(), params(SESSION_ID))).status).toBe(201);
-    // Still alice's row, even though bob paid for the picture.
-    expect(store.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "pending", user_id: "alice" }),
-    );
+    expect((await POST(regenReq(), params(SESSION_ID))).status).toBe(202);
+    expect(jobOf().requestedBy).toBe("bob");
   });
 
   it("requires authentication", async () => {
     mockGetIronSession.mockResolvedValue(unauthSession() as never);
     expect((await POST(regenReq(), params(SESSION_ID))).status).toBe(401);
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 
-  it("does not rescue an exhausted session — that budget is the owner's to reset", async () => {
+  it("rescues a session whose automatic retries are spent", async () => {
+    // Uncapped on purpose: this costs a deliberate press each time, where the
+    // page-load path that the budget protects runs on its own.
     mockGetIronSession.mockResolvedValue(authSession("bob") as never);
+    scene({ status: "failed", attempts: 3 });
 
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(b({ inserted: [] }))
-      .mockReturnValueOnce(b({ first: { status: "failed", attempts: 3 } })) // budget spent
-      .mockReturnValueOnce(b({ updated: [] }));                             // nothing to reclaim
-
-    const body = await (await POST(regenReq(), params(SESSION_ID))).json();
-    expect(body).toMatchObject({ status: "failed", canRetry: false });
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect((await POST(regenReq(), params(SESSION_ID))).status).toBe(202);
+    expect(jobOf().attempts).toBe(1);
   });
 
-  it("loses to a regeneration already in flight rather than generating twice", async () => {
+  it("still refuses to queue without the flag", async () => {
     mockGetIronSession.mockResolvedValue(authSession("alice") as never);
-
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(b({ inserted: [] }))
-      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }))
-      .mockReturnValueOnce(b({ updated: [] })); // someone else took the ready row first
-
-    const body = await (await POST(regenReq(), params(SESSION_ID))).json();
-    expect(body).toMatchObject({ status: "pending" });
-    expect(mockGenerate).not.toHaveBeenCalled();
-  });
-
-  it("still refuses to regenerate without the flag", async () => {
-    mockGetIronSession.mockResolvedValue(authSession("alice") as never);
-
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(b({ inserted: [] }))
-      .mockReturnValueOnce(b({ first: { status: "ready", attempts: 1, updated_at: UPDATED } }));
+    scene(READY_ROW);
 
     const body = await (await POST(req("POST"), params(SESSION_ID))).json();
     expect(body).toMatchObject({
       status: "ready",
       url: `/api/tick-sessions/${SESSION_ID}/image/raw?v=${UPDATED.getTime()}`,
     });
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 });
 
@@ -431,126 +384,51 @@ describe("GET /api/tick-sessions/[id]/image/raw", () => {
 // ── Retry after failure ───────────────────────────────────────────────────────
 //
 // Image generation fails transiently. These pin the recovery path: a failed
-// session tries again on the next visit, but only while it has budget left.
+// session is queued again on the next visit, but only while it has budget left.
 
 describe("POST /api/tick-sessions/[id]/image — retry after failure", () => {
   beforeEach(() => mockGetIronSession.mockResolvedValue(authSession("alice") as never));
 
-  it("re-claims a failed session and generates again while attempts remain", async () => {
-    mockGenerate.mockResolvedValue(banner);
+  it("queues a failed session again while attempts remain", async () => {
+    scene({ status: "failed", attempts: 1 });
 
-    const store = b({ inserted: [], updated: [{ attempts: 2 }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))                                  // session lookup
-      .mockReturnValueOnce(store)                                                     // claim insert loses
-      .mockReturnValueOnce(b({ first: { status: "failed", attempts: 1 } }))           // existing row
-      .mockReturnValueOnce(store)                                                     // reclaim update
-      .mockReturnValueOnce(b({ rows: [tickRow] }))                                    // session ticks
-      .mockReturnValueOnce(store);                                                    // store result
-
-    const res = await POST(req("POST"), params(SESSION_ID));
-    expect(res.status).toBe(201);
-    expect(await res.json()).toMatchObject({ status: "ready" });
-    expect(mockGenerate).toHaveBeenCalledTimes(1);
-  });
-
-  it("counts the attempt so repeated failures cannot retry forever", async () => {
-    mockGenerate.mockResolvedValue(banner);
-
-    const store = b({ inserted: [], updated: [{ attempts: 2 }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ first: { status: "failed", attempts: 1 } }))
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ rows: [tickRow] }))
-      .mockReturnValueOnce(store);
-
-    await POST(req("POST"), params(SESSION_ID));
-
-    // The reclaim increments rather than resetting.
-    expect(store.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "pending", attempts: { __raw: "attempts + 1" } }),
-    );
-  });
-
-  it("leaves a session alone once its attempts are spent", async () => {
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(b({ inserted: [] }))
-      .mockReturnValueOnce(b({ first: { status: "failed", attempts: 3 } }))
-      .mockReturnValueOnce(b({ updated: [] })); // budget spent — nothing to reclaim
-
-    const res = await POST(req("POST"), params(SESSION_ID));
-    expect(await res.json()).toMatchObject({ status: "failed", canRetry: false, attempts: 3 });
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect((await POST(req("POST"), params(SESSION_ID))).status).toBe(202);
+    expect(jobOf().attempts).toBe(2);
   });
 
   it("resets the budget when the owner explicitly retries with ?retry=1", async () => {
-    mockGenerate.mockResolvedValue(banner);
-
-    const store = b({ inserted: [], updated: [{ attempts: 1 }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ first: { status: "failed", attempts: 3 } })) // exhausted
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ rows: [tickRow] }))
-      .mockReturnValueOnce(store);
+    scene({ status: "failed", attempts: 3 }); // exhausted
 
     const forced = new NextRequest(
       `http://localhost/api/tick-sessions/${SESSION_ID}/image?retry=1`,
       { method: "POST" },
     );
-
-    const res = await POST(forced, params(SESSION_ID));
-    expect(res.status).toBe(201);
-    expect(store.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "pending", attempts: 1 }),
-    );
-    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    expect((await POST(forced, params(SESSION_ID))).status).toBe(202);
+    expect(jobOf().attempts).toBe(1);
   });
 
   it("ignores ?retry=1 from anyone but the owner", async () => {
     mockGetIronSession.mockResolvedValue(authSession("bob") as never);
-    mockGenerate.mockResolvedValue(banner);
-
-    const store = b({ inserted: [], updated: [{ attempts: 4 }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))                        // owned by alice
-      .mockReturnValueOnce(store)                                           // claim insert loses
-      .mockReturnValueOnce(b({ first: { status: "failed", attempts: 3 } })) // budget spent
-      .mockReturnValueOnce(store)                                           // reclaim attempt
-      .mockReturnValueOnce(b({ rows: [tickRow] }))
-      .mockReturnValueOnce(store);
+    scene({ status: "failed", attempts: 3 }); // owned by alice, budget spent
 
     const forced = new NextRequest(
       `http://localhost/api/tick-sessions/${SESSION_ID}/image?retry=1`,
       { method: "POST" },
     );
-    await POST(forced, params(SESSION_ID));
+    const body = await (await POST(forced, params(SESSION_ID))).json();
 
-    // Incremented, not reset to 1 — the flag was dropped. (Against real
-    // Postgres the `attempts < 3` predicate in that same UPDATE is what then
-    // matches nothing; the stub can't evaluate it, so what is pinned here is
-    // that a visitor never gets `force`.)
-    expect(store.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "pending", attempts: { __raw: "attempts + 1" } }),
-    );
+    // The flag was dropped, so the spent budget still applies.
+    expect(body).toMatchObject({ status: "failed", canRetry: false });
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 
   it("reports a fresh failure as retryable so the next visit picks it up", async () => {
-    mockGenerate.mockRejectedValue(new Error("Invalid JSON response"));
+    dispatch({
+      tick_sessions: b({ first: sessionRow }),
+      session_images: b({ first: { status: "failed", attempts: 1, updated_at: UPDATED } }),
+    });
 
-    const store = b({ inserted: [{ session_id: SESSION_ID }] });
-    mockDb
-      .mockReturnValueOnce(b({ first: sessionRow }))
-      .mockReturnValueOnce(store)
-      .mockReturnValueOnce(b({ rows: [tickRow] }))
-      .mockReturnValueOnce(store);
-
-    const res = await POST(req("POST"), params(SESSION_ID));
-    expect(res.status).toBe(502);
+    const res = await statusGET(req("GET"), params(SESSION_ID));
     expect(await res.json()).toMatchObject({ status: "failed", canRetry: true, attempts: 1 });
   });
 });
