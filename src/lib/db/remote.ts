@@ -5,6 +5,7 @@
 
 import { Board, Climb, ClimbTick, Tick, UserTick, User, Session, LogEntry, ClimberStats, FeedActivity, Comment, InboxItem, TickSessionSummary, TickSessionDetail, SessionImage } from "@/lib/types";
 import type { FeatureFlags } from "@/lib/featureFlags";
+import type { NoteCategory, NoteScope, StatsNote } from "@/lib/statsNotes";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -156,6 +157,63 @@ export async function regenerateSessionImage(id: string): Promise<SessionImage> 
   );
 }
 
+
+// ─── Stats notes ──────────────────────────────────────────────────────────────
+//
+// Private to their author, including on read — see the route handler. Every call
+// here 403s for anyone but the owner, so the UI only ever mounts for them.
+
+/**
+ * Fetch the climber's own notes for a period range.
+ *
+ * Omit `scope` to get both granularities at once, which is what the week view
+ * needs: it shows weekly notes and the daily notes inside that week together.
+ */
+export async function getStatsNotes(
+  handle: string,
+  opts: { from?: string; to?: string; scope?: NoteScope } = {},
+): Promise<StatsNote[]> {
+  const qs = new URLSearchParams();
+  if (opts.from) qs.set("from", opts.from);
+  if (opts.to) qs.set("to", opts.to);
+  if (opts.scope) qs.set("scope", opts.scope);
+  const suffix = qs.toString() ? `?${qs}` : "";
+
+  const { notes } = await api<{ notes: StatsNote[] }>(
+    `/users/${encodeURIComponent(handle)}/stats-notes${suffix}`,
+  );
+  return notes;
+}
+
+/** Attach a note to a day, or to the Monday of a week. */
+export async function createStatsNote(
+  handle: string,
+  note: { scope: NoteScope; period: string; category: NoteCategory; data: Record<string, unknown> },
+): Promise<StatsNote> {
+  const { note: created } = await api<{ note: StatsNote }>(
+    `/users/${encodeURIComponent(handle)}/stats-notes`,
+    { method: "POST", body: JSON.stringify(note) },
+  );
+  return created;
+}
+
+/**
+ * Delete one note.
+ *
+ * `scope` is the view the deletion is made from; the server refuses when it does
+ * not match the note's own scope, which is what stops a daily note being removed
+ * from the week view that merely displays it.
+ */
+export async function deleteStatsNote(
+  handle: string,
+  id: string,
+  scope: NoteScope,
+): Promise<void> {
+  await api<void>(
+    `/users/${encodeURIComponent(handle)}/stats-notes/${encodeURIComponent(id)}?scope=${scope}`,
+    { method: "DELETE" },
+  );
+}
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 
