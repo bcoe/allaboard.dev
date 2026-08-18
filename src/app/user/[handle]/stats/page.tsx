@@ -517,6 +517,69 @@ function BoardSelect({
 
 // ─── ChartFilters ─────────────────────────────────────────────────────────────
 
+/**
+ * A date input that reports its value when you leave it, not while you type.
+ *
+ * A native `<input type="date">` fires `change` as soon as its segments form a
+ * *complete* date — and while retyping a year, they do so almost immediately. Type
+ * one digit over the year of `2026-02-18` and the segment holds `0002`, giving the
+ * complete-and-valid `0002-02-18`. The old field clamped that straight to the
+ * 2012 floor, replacing the value under the cursor, so the remaining digits landed
+ * in a field that had just reset and a year could never be typed at all.
+ *
+ * Holding a draft until blur fixes both halves of that: validation stops fighting
+ * the keyboard, and the two ECharts instances stop re-rendering on every keystroke.
+ * Enter commits without leaving, Escape abandons the edit.
+ *
+ * (The picker's own year→month tabbing is internal to the browser widget and its
+ * segments are not addressable from script, so "advance to the month, then commit"
+ * is not something a `type="date"` field can be made to do — blur and Enter are the
+ * commit points available.)
+ */
+function DateField({
+  label,
+  value,
+  min,
+  max,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  min?: string;
+  max?: string;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+
+  const commit = () => {
+    // A half-typed date leaves the input empty; treat that as "no change" rather
+    // than as a request to clear the range.
+    if (draft && draft !== value) onCommit(draft);
+    else if (!draft) setDraft(value);
+  };
+
+  return (
+    <input
+      type="date"
+      aria-label={label}
+      value={draft}
+      min={min}
+      max={max}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Escape") {
+          setDraft(value);
+        }
+      }}
+      className="bg-stone-800 border border-stone-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
+    />
+  );
+}
+
 function ChartFilters({
   allBoards,
   filter,
@@ -534,26 +597,30 @@ function ChartFilters({
 
   return (
     <div className="flex flex-wrap items-center gap-2 mb-4">
-      <input
-        type="date"
+      {/*
+        Keyed on the committed value so an external change — the other field's
+        commit can clamp this one — remounts the field with the new date. Commits
+        only happen on blur, so nothing the climber was mid-way through typing is
+        ever thrown away by a remount.
+      */}
+      <DateField
+        key={`from-${filter.dateFrom}`}
+        label="Start date"
         value={filter.dateFrom}
         min={earliestAllowed}
         max={filter.dateTo}
-        onChange={(e) =>
-          onChange({ ...filter, dateFrom: clampDateFrom(e.target.value, filter.dateTo) })
-        }
-        className="bg-stone-800 border border-stone-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
+        onCommit={(v) => onChange({ ...filter, dateFrom: clampDateFrom(v, filter.dateTo) })}
       />
       <span className="text-stone-500 text-sm">to</span>
-      <input
-        type="date"
+      <DateField
+        key={`to-${filter.dateTo}`}
+        label="End date"
         value={filter.dateTo}
         min={filter.dateFrom}
         max={localDateStr(new Date())}
-        onChange={(e) =>
-          onChange({ ...filter, dateTo: e.target.value, dateFrom: clampDateFrom(filter.dateFrom, e.target.value) })
+        onCommit={(v) =>
+          onChange({ ...filter, dateTo: v, dateFrom: clampDateFrom(filter.dateFrom, v) })
         }
-        className="bg-stone-800 border border-stone-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
       />
       {allBoards.length > 0 && (
         <BoardSelect

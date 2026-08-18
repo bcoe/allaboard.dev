@@ -42,7 +42,23 @@ global.ResizeObserver = class {
   disconnect() {}
 };
 
+import { init as echartsInit } from "echarts";
+
 const mockGetUserTicks = jest.mocked(getUserTicks);
+
+/** The sends timeline's start-date field. Both charts render one, so scope to the first. */
+function startDateField(): HTMLElement {
+  return screen.getAllByLabelText("Start date")[0];
+}
+
+/** Total `setOption` calls across every chart instance — i.e. chart re-renders. */
+function chartRenders(): number {
+  return jest
+    .mocked(echartsInit)
+    .mock.results.map((r) => r.value)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .reduce((n, inst: any) => n + inst.setOption.mock.calls.length, 0);
+}
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -293,11 +309,14 @@ describe("UserStatsPage — date range clamping (earliest date: 2012-01-01)", ()
     render(<UserStatsPage />);
     await screen.findByText("Sends");
 
-    const [dateFromInput] = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/);
+    const dateFromInput = startDateField();
 
     fireEvent.change(dateFromInput, { target: { value: "1990-01-01" } });
+    // The clamp now runs when the field is left rather than on every keystroke —
+    // clamping mid-edit made a year impossible to type. See "deferred commit".
+    fireEvent.blur(dateFromInput);
 
-    expect((dateFromInput as HTMLInputElement).value).toBe(EARLIEST_DATE);
+    expect((startDateField() as HTMLInputElement).value).toBe(EARLIEST_DATE);
   });
 
   it("does not clamp dateFrom when it is on or after 2012-01-01", async () => {
@@ -329,5 +348,105 @@ describe("UserStatsPage — date range clamping (earliest date: 2012-01-01)", ()
     const [dateFromInput] = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/);
 
     expect((dateFromInput as HTMLInputElement).min).toBe(EARLIEST_DATE);
+  });
+});
+
+// ── Deferred commit on the date fields ────────────────────────────────────────
+//
+// A native `<input type="date">` fires `change` as soon as its segments form a
+// complete date, and while retyping a year they do so almost at once: one digit
+// over the year of `2026-02-18` leaves the segment holding `0002`, giving the
+// complete-and-valid `0002-02-18`. Clamping that immediately rewrote the value
+// under the cursor, so a year could never be typed at all — and every keystroke
+// re-rendered both charts.
+
+describe("UserStatsPage — date fields commit on blur, not while typing", () => {
+  beforeEach(() => {
+    // The filters only render alongside the charts, which need at least one tick.
+    mockGetUserTicks.mockResolvedValue([makeTick()]);
+  });
+
+  it("leaves a half-typed year alone instead of clamping it away", async () => {
+    // The exact keystroke that used to make the field unusable.
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    const field = startDateField();
+    fireEvent.change(field, { target: { value: "0002-02-18" } });
+
+    expect((field as HTMLInputElement).value).toBe("0002-02-18");
+  });
+
+  it("does not re-render the charts on a keystroke", async () => {
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    const before = chartRenders();
+    fireEvent.change(startDateField(), { target: { value: "0002-02-18" } });
+
+    expect(chartRenders()).toBe(before);
+  });
+
+  it("validates and re-renders once the field is left", async () => {
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    const field = startDateField();
+    fireEvent.change(field, { target: { value: "0002-02-18" } });
+    const before = chartRenders();
+
+    fireEvent.blur(field);
+
+    // Clamped to the 2012 floor — the validation still runs, just at commit time.
+    expect((startDateField() as HTMLInputElement).value).toBe("2012-01-01");
+    expect(chartRenders()).toBeGreaterThan(before);
+  });
+
+  it("commits on Enter, so the keyboard alone is enough", async () => {
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    const field = startDateField();
+    fireEvent.change(field, { target: { value: "2015-06-15" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+
+    expect((startDateField() as HTMLInputElement).value).toBe("2015-06-15");
+  });
+
+  it("abandons the edit on Escape", async () => {
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    const field = startDateField();
+    const original = (field as HTMLInputElement).value;
+
+    fireEvent.change(field, { target: { value: "2015-06-15" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+
+    expect((field as HTMLInputElement).value).toBe(original);
+  });
+
+  it("keeps the existing date when the field is left empty", async () => {
+    // Half-typing then tabbing away leaves the input blank; that is not a request
+    // to clear the range.
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    const field = startDateField();
+    const original = (field as HTMLInputElement).value;
+
+    fireEvent.change(field, { target: { value: "" } });
+    fireEvent.blur(field);
+
+    expect((startDateField() as HTMLInputElement).value).toBe(original);
+  });
+
+  it("labels both fields, which the bare inputs never did", async () => {
+    render(<UserStatsPage />);
+    await screen.findByText("Sends");
+
+    // One pair per chart — the sends timeline and the grade pyramid.
+    expect(screen.getAllByLabelText("Start date")).toHaveLength(2);
+    expect(screen.getAllByLabelText("End date")).toHaveLength(2);
   });
 });

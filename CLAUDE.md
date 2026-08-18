@@ -492,7 +492,7 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | `/profile` | `src/app/profile/page.tsx` | Current user profile |
 | `/stats` | `src/app/stats/page.tsx` | Stats dashboard |
 | `/onboarding` | `src/app/onboarding/page.tsx` | First-time setup after Google OAuth (display name, home board, max grade) |
-| `/user/[handle]/sessions` | `src/app/user/[handle]/sessions/page.tsx` | List of a user's climbing sessions ("My Sessions") |
+| `/user/[handle]/sessions` | `src/app/user/[handle]/sessions/page.tsx` | List of a user's climbing sessions |
 | `/user/[handle]/sessions/[id]` | `src/app/user/[handle]/sessions/[id]/page.tsx` | Session detail + permalink (stats, copy summary, climb cards) |
 
 ---
