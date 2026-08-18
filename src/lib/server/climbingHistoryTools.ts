@@ -17,6 +17,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import db from "@/lib/server/db";
 import { ALL_GRADES } from "@/lib/utils";
+import { CATEGORY_LABELS, YDS_GRADES, summariseNote, type StatsNote } from "@/lib/statsNotes";
 
 /**
  * Row ceiling for a single tool call.
@@ -99,6 +100,58 @@ async function inToolSpan<T>(
 function gradeRank(grade: string | null | undefined): number {
   if (!grade) return -1;
   return ALL_GRADES.indexOf(grade as (typeof ALL_GRADES)[number]);
+}
+
+/** Where an outdoor route grade sits on the YDS scale. Separate scale, separate order. */
+function ydsRank(grade: string | null | undefined): number {
+  if (!grade) return -1;
+  return (YDS_GRADES as readonly string[]).indexOf(grade);
+}
+
+/** The hardest of a set of grades on a given scale, or undefined if empty. */
+function hardestOn(
+  grades: (string | undefined)[],
+  rank: (g?: string | null) => number,
+): string | undefined {
+  return grades.filter(Boolean).sort((a, b) => rank(b) - rank(a))[0];
+}
+
+/** A note row as the tools read it. */
+interface NoteRow {
+  scope: "day" | "week";
+  period: string;
+  category: StatsNote["category"];
+  data: Record<string, unknown>;
+}
+
+/** Reads the climber's notes in a period range, oldest first. */
+async function fetchNotes(
+  userId: string,
+  from: string,
+  to: string,
+  scope?: "day" | "week",
+): Promise<NoteRow[]> {
+  const rows = await db("stats_notes")
+    .where({ user_id: userId })
+    .modify((q) => { if (scope) q.where({ scope }) })
+    .andWhere("period", ">=", from)
+    .andWhere("period", "<=", to)
+    .orderBy("period", "asc")
+    .limit(MAX_ROWS)
+    .select(
+      "scope",
+      "category",
+      "data",
+      db.raw("to_char(period, 'YYYY-MM-DD') as period"),
+    );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return rows.map((r: any) => ({
+    scope: r.scope,
+    period: r.period,
+    category: r.category,
+    data: r.data ?? {},
+  }));
 }
 
 /**
@@ -423,6 +476,184 @@ export function climbingHistoryTools(userId: string) {
           };
         }),
     }),
+    /**
+     * The climber's own notes — the context the board data cannot supply.
+     *
+     * Notes are what explain a logbook rather than just describe it: a month of
+     * thin board training reads as detraining until you see the outdoor sessions
+     * next to it. They also carry the things a tick never will — sleep, diet,
+     * strength work — which is where most day-of-week and cycle answers actually
+     * live.
+     *
+     * Private, like every other tool here: bound to the session's climber, who is
+     * the only person these are ever shown to.
+     */
+    listNotes: tool({
+      description:
+        "The climber's own notes in a date range: outdoor climbing and bouldering " +
+        "sessions, strength sessions, dietary notes and sleep notes. Day notes " +
+        "describe one day, week notes describe a whole week. Use these for context " +
+        "the board data cannot give — why a quiet training month was quiet, how " +
+        "sleep or drinking lines up with form, whether strength work is happening. " +
+        "Ask for months at a time.",
+      inputSchema: z.object({
+        from: isoDate.describe("Start of the range, inclusive (YYYY-MM-DD)."),
+        to: isoDate.describe("End of the range, inclusive (YYYY-MM-DD)."),
+        scope: z
+          .enum(["day", "week"])
+          .optional()
+          .describe("Limit to day notes or week notes. Omit for both."),
+        category: z
+          .enum(["outdoor_climbing", "outdoor_bouldering", "strength", "dietary", "sleep"])
+          .optional()
+          .describe("Limit to one kind of note. Omit for all."),
+      }),
+      execute: async ({ from, to, scope, category }) =>
+        inToolSpan("listNotes", "The climber's own day and week notes", { from, to, scope, category }, async () => {
+          const all = await fetchNotes(userId, from, to, scope);
+          const notes = category ? all.filter((n) => n.category === category) : all;
+
+          return {
+            from,
+            to,
+            count: notes.length,
+            legend:
+              "scope 'day' describes that date; scope 'week' describes the week " +
+              "beginning on that date (a Monday). Outdoor grades are YDS for routes " +
+              "and V-scale for boulders — a different scale from the board climbs.",
+            notes: notes.map((n) => ({
+              date: n.period,
+              scope: n.scope,
+              kind: CATEGORY_LABELS[n.category],
+              category: n.category,
+              // A readable line plus the raw fields, so the model can quote it or
+              // do arithmetic on it without re-deriving either.
+              summary: summariseNote({
+                id: "", createdAt: "", scope: n.scope, period: n.period,
+                category: n.category, data: n.data,
+              }),
+              ...n.data,
+            })),
+          };
+        }),
+    }),
+
+    /**
+     * Notes rolled up by month — the series a "do you see any cycles" question
+     * needs, without asking the model to tally hundreds of rows.
+     */
+    notesSummary: tool({
+      description:
+        "Month-by-month rollup of the climber's notes: outdoor climbing and " +
+        "bouldering days, pitches, hardest outdoor grades, strength days, alcoholic " +
+        "drinks logged, and how often they reported sleeping well or badly. Use this " +
+        "for cycles, training-load and lifestyle-versus-form questions before " +
+        "reaching for individual notes.",
+      inputSchema: z.object({
+        months: z
+          .number()
+          .int()
+          .min(1)
+          .max(36)
+          .describe("How many months back from today to summarise."),
+      }),
+      execute: async ({ months }) =>
+        inToolSpan("notesSummary", "Monthly rollup of notes", { months }, async () => {
+          const to = new Date();
+          const from = new Date(to);
+          from.setMonth(from.getMonth() - months);
+          const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+          const notes = await fetchNotes(userId, iso(from), iso(to));
+
+          interface Bucket {
+            outdoorClimbingDays: Set<string>;
+            outdoorBoulderingDays: Set<string>;
+            strengthDays: Set<string>;
+            pitches: number;
+            routeGrades: (string | undefined)[];
+            boulderGrades: (string | undefined)[];
+            /** Kept apart: a daily and a weekly total would double-count. */
+            drinksLoggedDaily: number;
+            drinksLoggedWeekly: number;
+            sleptWell: number;
+            sleptBadly: number;
+            flags: Map<string, number>;
+          }
+          const empty = (): Bucket => ({
+            outdoorClimbingDays: new Set(), outdoorBoulderingDays: new Set(),
+            strengthDays: new Set(), pitches: 0, routeGrades: [], boulderGrades: [],
+            drinksLoggedDaily: 0, drinksLoggedWeekly: 0,
+            sleptWell: 0, sleptBadly: 0, flags: new Map(),
+          });
+
+          const buckets = new Map<string, Bucket>();
+          for (const n of notes) {
+            const month = n.period.slice(0, 7);
+            const b = buckets.get(month) ?? empty();
+            const d = n.data as Record<string, never>;
+
+            switch (n.category) {
+              case "outdoor_climbing":
+                b.outdoorClimbingDays.add(n.period);
+                b.pitches += Number(d.pitchCount ?? 0);
+                b.routeGrades.push(d.hardestRouteSent, d.hardestRouteWorked);
+                break;
+              case "outdoor_bouldering":
+                b.outdoorBoulderingDays.add(n.period);
+                b.boulderGrades.push(d.hardestBoulderSent, d.hardestBoulderWorked);
+                break;
+              case "strength":
+                b.strengthDays.add(n.period);
+                break;
+              case "dietary":
+                if (typeof d.drinks === "number") {
+                  if (n.scope === "day") b.drinksLoggedDaily += d.drinks;
+                  else b.drinksLoggedWeekly += d.drinks;
+                }
+                for (const f of (d.flags ?? []) as string[]) {
+                  b.flags.set(f, (b.flags.get(f) ?? 0) + 1);
+                }
+                break;
+              case "sleep":
+                for (const f of (d.flags ?? []) as string[]) {
+                  // "Slept well" / "Slept poorly" phrasing differs per scope, so
+                  // match on the sentiment rather than the exact string.
+                  if (/well/i.test(f)) b.sleptWell++;
+                  else b.sleptBadly++;
+                  b.flags.set(f, (b.flags.get(f) ?? 0) + 1);
+                }
+                break;
+            }
+            buckets.set(month, b);
+          }
+
+          return {
+            months,
+            legend:
+              "Daily and weekly drink counts are reported separately because adding " +
+              "them would double-count a climber who logs both. Outdoor route grades " +
+              "are YDS; outdoor boulder grades are V-scale.",
+            series: [...buckets.entries()]
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([month, b]) => ({
+                month,
+                outdoorClimbingDays: b.outdoorClimbingDays.size,
+                outdoorBoulderingDays: b.outdoorBoulderingDays.size,
+                outdoorPitches: b.pitches,
+                hardestOutdoorRoute: hardestOn(b.routeGrades, ydsRank),
+                hardestOutdoorBoulder: hardestOn(b.boulderGrades, gradeRank),
+                strengthDays: b.strengthDays.size,
+                drinksLoggedDaily: b.drinksLoggedDaily,
+                drinksLoggedWeekly: b.drinksLoggedWeekly,
+                sleptWellReports: b.sleptWell,
+                sleptBadlyReports: b.sleptBadly,
+                otherFlags: Object.fromEntries(b.flags),
+              })),
+          };
+        }),
+    }),
+
     /**
      * The multiplier scale itself.
      *

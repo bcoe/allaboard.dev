@@ -158,6 +158,37 @@ export async function regenerateSessionImage(id: string): Promise<SessionImage> 
 }
 
 
+export interface MountainProjectImportResult {
+  notesCreated: number;
+  climbingSessions: number;
+  boulderingSessions: number;
+  daysInFile: number;
+  rowsParsed: number;
+  skipped: {
+    alreadyNoted: number;
+    unparsableDate: number;
+    unknownGrade: number;
+    invalid: number;
+  };
+}
+
+/**
+ * Import a Mountain Project CSV export as outdoor day notes.
+ *
+ * The ticks do not become climbs — they are outdoor rock, with no board or angle
+ * — so they land as private day notes instead. Re-importing the same file is a
+ * no-op: a day already carrying a note of that category is skipped.
+ */
+export async function importMountainProjectCsv(
+  handle: string,
+  csv: string,
+): Promise<MountainProjectImportResult> {
+  return api<MountainProjectImportResult>(
+    `/users/${encodeURIComponent(handle)}/import/mountain-project`,
+    { method: "POST", body: JSON.stringify({ csv }) },
+  );
+}
+
 // ─── Stats notes ──────────────────────────────────────────────────────────────
 //
 // Private to their author, including on read — see the route handler. Every call

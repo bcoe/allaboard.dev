@@ -253,3 +253,145 @@ describe("board difficulty weighting", () => {
     });
   });
 });
+
+// ── Notes as agent context ────────────────────────────────────────────────────
+//
+// A logbook of board climbs is half the picture: a quiet training month reads as
+// detraining until the outdoor sessions next to it are visible. These tools are
+// what let the agent see the other half — and, like every tool here, they are
+// bound to one climber, since notes are private.
+
+describe("note tools", () => {
+  const noteRow = (over: Record<string, unknown> = {}) => ({
+    scope: "day",
+    period: "2026-05-04",
+    category: "outdoor_climbing",
+    data: { pitchCount: 4, hardestRouteSent: "5.11d" },
+    ...over,
+  });
+
+  it("filters notes to the climber the tools were built for", async () => {
+    const q = qb([noteRow()]);
+    mockDb.mockReturnValue(q);
+
+    await tools().listNotes.execute({ from: "2026-01-01", to: "2026-12-31" });
+
+    expect(q.__where).toContainEqual([{ user_id: "alice" }]);
+  });
+
+  it("returns a readable summary alongside the raw fields", async () => {
+    // The summary is for quoting; the raw fields are for arithmetic. Deriving one
+    // from the other in the model's head is how numbers drift.
+    mockDb.mockReturnValue(qb([noteRow()]));
+
+    const out = await tools().listNotes.execute({ from: "2026-01-01", to: "2026-12-31" });
+
+    expect(out.notes[0]).toMatchObject({
+      date: "2026-05-04",
+      scope: "day",
+      kind: "Outdoor Climbing Session",
+      pitchCount: 4,
+      hardestRouteSent: "5.11d",
+    });
+    expect(out.notes[0].summary).toMatch(/sent 5\.11d/);
+  });
+
+  it("says which scale outdoor grades are on", async () => {
+    // YDS for routes, V-scale for boulders, and neither belongs in the board's
+    // adjusted-points arithmetic.
+    mockDb.mockReturnValue(qb([]));
+
+    const out = await tools().listNotes.execute({ from: "2026-01-01", to: "2026-12-31" });
+
+    expect(out.legend).toMatch(/YDS/);
+    expect(out.legend).toMatch(/V-scale/);
+  });
+
+  it("rolls notes up by month for cycle questions", async () => {
+    mockDb.mockReturnValue(
+      qb([
+        noteRow({ period: "2026-05-04" }),
+        noteRow({ period: "2026-05-11", data: { pitchCount: 2, hardestRouteSent: "5.12a" } }),
+        noteRow({ period: "2026-05-12", category: "strength", data: {} }),
+        noteRow({
+          period: "2026-05-13", category: "dietary", data: { drinks: 3, flags: ["Stayed well hydrated"] },
+        }),
+        noteRow({ period: "2026-05-14", category: "sleep", data: { flags: ["Slept poorly night before"] } }),
+        noteRow({
+          period: "2026-05-04", category: "outdoor_bouldering", data: { hardestBoulderSent: "V6" },
+        }),
+      ]),
+    );
+
+    const out = await tools().notesSummary.execute({ months: 12 });
+    const may = out.series.find((m: { month: string }) => m.month === "2026-05");
+
+    expect(may).toMatchObject({
+      outdoorClimbingDays: 2,
+      outdoorBoulderingDays: 1,
+      outdoorPitches: 6,
+      // Hardest on the YDS scale, which orders differently from the V-scale.
+      hardestOutdoorRoute: "5.12a",
+      hardestOutdoorBoulder: "V6",
+      strengthDays: 1,
+      drinksLoggedDaily: 3,
+      sleptBadlyReports: 1,
+    });
+  });
+
+  it("keeps daily and weekly drink counts apart", async () => {
+    // Adding them would double-count a climber who logs both, and a wrong total
+    // is worse than two honest ones.
+    mockDb.mockReturnValue(
+      qb([
+        noteRow({ period: "2026-05-13", category: "dietary", data: { drinks: 2 } }),
+        noteRow({ scope: "week", period: "2026-05-11", category: "dietary", data: { drinks: 9 } }),
+      ]),
+    );
+
+    const out = await tools().notesSummary.execute({ months: 6 });
+    const may = out.series.find((m: { month: string }) => m.month === "2026-05");
+
+    expect(may.drinksLoggedDaily).toBe(2);
+    expect(may.drinksLoggedWeekly).toBe(9);
+    expect(out.legend).toMatch(/double-count/);
+  });
+
+  it("recognises a good night's sleep at either scope", async () => {
+    // The wording differs per scope ("Slept well night before" vs "Slept well this
+    // week"), so the rollup matches on sentiment rather than the exact string.
+    mockDb.mockReturnValue(
+      qb([
+        noteRow({ period: "2026-05-02", category: "sleep", data: { flags: ["Slept well night before"] } }),
+        noteRow({ scope: "week", period: "2026-05-04", category: "sleep", data: { flags: ["Slept well this week"] } }),
+        noteRow({ period: "2026-05-06", category: "sleep", data: { flags: ["Had trouble sleeping this week"] } }),
+      ]),
+    );
+
+    const out = await tools().notesSummary.execute({ months: 6 });
+    const may = out.series.find((m: { month: string }) => m.month === "2026-05");
+
+    expect(may.sleptWellReports).toBe(2);
+    expect(may.sleptBadlyReports).toBe(1);
+  });
+
+  it("opens a gen_ai.execute_tool span like every other tool", async () => {
+    mockDb.mockReturnValue(qb([]));
+
+    await tools().listNotes.execute({ from: "2026-01-01", to: "2026-12-31" });
+
+    expect(spans[0]).toMatchObject({
+      name: "execute_tool listNotes",
+      op: "gen_ai.execute_tool",
+      attributes: expect.objectContaining({ "gen_ai.tool.name": "listNotes" }),
+    });
+  });
+
+  it("exposes no note tool that takes a user id", () => {
+    for (const name of ["listNotes", "notesSummary"]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const keys = Object.keys((tools() as any)[name].inputSchema?.shape ?? {});
+      expect(keys.join(",")).not.toMatch(/user|handle|climber/i);
+    }
+  });
+});

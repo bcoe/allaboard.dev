@@ -16,10 +16,12 @@ import {
   unfollowUser,
   importAuroraData,
   importMoonboardData,
+  importMountainProjectCsv,
   recalculateBoardDifficulty,
   setFeatureFlag,
   type AuroraImportResult,
   type MoonboardImportResult,
+  type MountainProjectImportResult,
   type BoardDifficultyResult,
 } from "@/lib/db";
 import { useAuth } from "@/lib/auth-context";
@@ -829,6 +831,11 @@ function ImportSection({
   const [mbBoardName, setMbBoardName] = useState<string>(MOONBOARD_OPTIONS[0].boardName);
   const mbFileInputRef = useRef<HTMLInputElement>(null);
 
+  const [mpImporting, setMpImporting] = useState(false);
+  const [mpResult, setMpResult] = useState<MountainProjectImportResult | null>(null);
+  const [mpError, setMpError] = useState<string | null>(null);
+  const mpFileInputRef = useRef<HTMLInputElement>(null);
+
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -885,6 +892,36 @@ function ImportSection({
     } finally {
       setMbImporting(false);
       if (mbFileInputRef.current) mbFileInputRef.current.value = "";
+    }
+  }
+
+  /**
+   * Mountain Project exports CSV, not JSON, and its rows are outdoor rock — so
+   * the text goes up as-is and the server turns it into day notes rather than
+   * climbs. Parsing happens server-side, where the grouping rules already live.
+   */
+  async function handleMountainProjectFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setMpResult(null);
+    setMpError(null);
+    setMpImporting(true);
+
+    try {
+      const text = await file.text();
+      if (!text.trim()) {
+        setMpError("That file is empty.");
+        return;
+      }
+      const res = await importMountainProjectCsv(handle, text);
+      setMpResult(res);
+      onSuccess();
+    } catch {
+      setMpError("Import failed — check it is the CSV Mountain Project exported.");
+    } finally {
+      setMpImporting(false);
+      if (mpFileInputRef.current) mpFileInputRef.current.value = "";
     }
   }
 
@@ -1066,6 +1103,144 @@ function ImportSection({
         {mbError && (
           <p className="text-red-400 text-sm">{mbError}</p>
         )}
+      </div>
+
+      {/* ── Mountain Project — its own card, like every other import ──────── */}
+      <div className="bg-stone-800 border border-stone-700 rounded-xl p-4 space-y-3 mt-3">
+        <div>
+          <p className="text-stone-300 text-sm font-medium">Upload Mountain Project Ticks</p>
+          <p className="text-stone-400 text-xs mt-1 leading-relaxed">
+            You can download a full list of your climbing exploits from{" "}
+            <a
+              href="https://www.mountainproject.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-orange-400 hover:text-orange-300 underline"
+            >
+              mountainproject.com
+            </a>
+            {" "}— open your profile, then <em>Ticks</em> → <em>Export CSV</em>.
+          </p>
+          <p className="text-stone-500 text-xs mt-1.5 leading-relaxed">
+            These climbs are not imported as ticks; rather, they are added as notes to
+            provide supplemental information alongside your board training. This is a
+            board training app!
+          </p>
+        </div>
+
+        {/*
+          A label acting as the button, with the input hidden inside it.
+          The `file:` variants style the native picker but cannot rename it — it
+          always reads "Choose file" — and this import only accepts one format, so
+          the label is worth saying out loud.
+        */}
+        <label
+          className={`inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors ${
+            mpImporting
+              ? "cursor-not-allowed bg-stone-700 text-stone-500"
+              : "cursor-pointer bg-orange-500 hover:bg-orange-400"
+          }`}
+        >
+          Choose CSV File
+          <input
+            ref={mpFileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleMountainProjectFile}
+            disabled={mpImporting}
+            className="sr-only"
+          />
+        </label>
+
+        {mpImporting && (
+          <p className="text-stone-400 text-sm">Reading your ticks…</p>
+        )}
+
+        {mpResult && (
+          <div className="bg-stone-900 border border-stone-700 rounded-lg p-3 space-y-2">
+            {/*
+              Lead with a sentence, then the breakdown.
+              "Notes added: 0" beside "Days already noted: 261" is arithmetic the
+              reader should not have to do to work out whether anything happened.
+            */}
+            <p className="text-sm text-stone-300">
+              {mpResult.notesCreated > 0 ? (
+                <>
+                  Added{" "}
+                  <strong className="text-green-400">
+                    {mpResult.notesCreated} note{mpResult.notesCreated === 1 ? "" : "s"}
+                  </strong>{" "}
+                  from {mpResult.rowsParsed} tick
+                  {mpResult.rowsParsed === 1 ? "" : "s"}.
+                </>
+              ) : mpResult.skipped.alreadyNoted > 0 ? (
+                <>Nothing new to add — every day in this file already has notes.</>
+              ) : (
+                <>No outdoor sessions found in that file.</>
+              )}
+            </p>
+
+            <dl className="text-sm space-y-1">
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-stone-400">Notes added</dt>
+                <dd className={mpResult.notesCreated > 0 ? "text-green-400 font-medium" : "text-stone-500"}>
+                  {mpResult.notesCreated}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 pl-3">
+                <dt className="text-stone-500 text-xs">Climbing sessions added</dt>
+                <dd className="text-stone-400 text-xs">{mpResult.climbingSessions}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 pl-3">
+                <dt className="text-stone-500 text-xs">Bouldering sessions added</dt>
+                <dd className="text-stone-400 text-xs">{mpResult.boulderingSessions}</dd>
+              </div>
+
+              {/* Always shown when anything was skipped, with the reason. */}
+              {mpResult.skipped.alreadyNoted > 0 && (
+                <div className="flex items-center justify-between gap-4 pt-1 mt-1 border-t border-stone-800">
+                  <dt className="text-stone-400">Notes skipped — that day already has one</dt>
+                  <dd className="text-stone-300">{mpResult.skipped.alreadyNoted}</dd>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-4 pt-1 mt-1 border-t border-stone-800">
+                <dt className="text-stone-500 text-xs">Ticks read</dt>
+                <dd className="text-stone-500 text-xs">
+                  {mpResult.rowsParsed} across {mpResult.daysInFile} day
+                  {mpResult.daysInFile === 1 ? "" : "s"}
+                </dd>
+              </div>
+
+              {(mpResult.skipped.unknownGrade > 0 ||
+                mpResult.skipped.unparsableDate > 0 ||
+                mpResult.skipped.invalid > 0) && (
+                <div className="pt-1 mt-1 border-t border-stone-800 space-y-1">
+                  {mpResult.skipped.unknownGrade > 0 && (
+                    <div className="flex items-center justify-between gap-4 pl-3">
+                      <dt className="text-stone-500 text-xs">Unrecognised grade</dt>
+                      <dd className="text-stone-500 text-xs">{mpResult.skipped.unknownGrade}</dd>
+                    </div>
+                  )}
+                  {mpResult.skipped.unparsableDate > 0 && (
+                    <div className="flex items-center justify-between gap-4 pl-3">
+                      <dt className="text-stone-500 text-xs">Rows with no usable date</dt>
+                      <dd className="text-stone-500 text-xs">{mpResult.skipped.unparsableDate}</dd>
+                    </div>
+                  )}
+                  {mpResult.skipped.invalid > 0 && (
+                    <div className="flex items-center justify-between gap-4 pl-3">
+                      <dt className="text-stone-500 text-xs">Notes rejected as invalid</dt>
+                      <dd className="text-stone-500 text-xs">{mpResult.skipped.invalid}</dd>
+                    </div>
+                  )}
+                </div>
+              )}
+            </dl>
+          </div>
+        )}
+
+        {mpError && <p className="text-red-400 text-sm">{mpError}</p>}
       </div>
     </section>
   );

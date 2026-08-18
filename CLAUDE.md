@@ -465,6 +465,7 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | GET | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
 | POST | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
 | GET | `/api/tick-sessions/:id/image/raw` | `src/app/api/tick-sessions/[id]/image/raw/route.ts` |
+| POST | `/api/users/:handle/import/mountain-project` | `src/app/api/users/[handle]/import/mountain-project/route.ts` — CSV → outdoor day notes; owner-only |
 | GET | `/api/users/:handle/stats-notes` | `src/app/api/users/[handle]/stats-notes/route.ts` — **owner-only, including reads** |
 | POST | `/api/users/:handle/stats-notes` | `src/app/api/users/[handle]/stats-notes/route.ts` |
 | DELETE | `/api/users/:handle/stats-notes/:id` | `src/app/api/users/[handle]/stats-notes/[id]/route.ts` |
@@ -741,6 +742,40 @@ The chip is loaded with `next/dynamic` — it is owner-only, so a visitor should
 
 ---
 
+## Import Mountain Project Ticks
+
+An upload on your own profile page (`Import Data` → *Upload Mountain Project Ticks*) that turns a Mountain Project CSV export into outdoor **day notes**.
+
+| Piece | File |
+|---|---|
+| Parser + grouping rules (pure) | `src/lib/server/importMountainProject.ts` |
+| Endpoint | `src/app/api/users/[handle]/import/mountain-project/route.ts` |
+| UI | `ImportSection` in `src/app/user/[handle]/page.tsx` |
+
+**They do not become climbs.** A Mountain Project tick is outdoor rock — no board, no angle — so adding them to the climbs directory everyone browses would pollute it. They land as private day notes: outside context for how someone's climbing is going, which is what notes are for. Owner-only, like the notes themselves.
+
+One day becomes at most two notes — an Outdoor Climbing Session for that day's roped climbs, an Outdoor Bouldering Session for its boulders. Per note: **pitches** summed across that day's rows (routes and boulders counted separately, since they are separate notes), the **hardest sent**, and the **hardest worked**. A missing send is left blank rather than guessed at.
+
+### Reading the export
+
+Rules derived from a real 724-row export and pinned by a stub fixture in `src/__tests__/lib/importMountainProject.test.ts` that reproduces every awkward shape it contained:
+
+- **Columns are resolved by header name, not position.** The spec for this feature placed Lead Style at column 9; the real file has `Your Stars` there and Lead Style at 11. Reading by name makes a reordered or extended export a non-event instead of a silent mis-import.
+- **`Rating Code` decides "hardest".** It is Mountain Project's own numeric ordering and is monotonic with difficulty, interleaving slash grades correctly (`5.10a/b` = 2800 between 5.10a = 2600 and 5.10b = 2900). Comparing grade *strings* would need a parser that already handles every messy variant.
+- **Boulders record success in `Style`; routed climbs in `Lead Style`** — which is always blank on a boulder row.
+- **Four lead styles mean "I climbed it", not one.** The spec named only `Redpoint`, but `Onsight`, `Flash` and `Pinkpoint` are ascents too — an onsight is a *harder* one. In the reference export they are 56 rows across 43 days that would otherwise have reported no send at all. `Fell/Hung` is the one status meaning worked-but-not-sent.
+- **An unrecognised status still records a session.** A top-roped or unlabelled day was a day out; it just claims no grade.
+- **Grades resolve downward**, so an import never overstates: a slash grade takes its lower half (`5.12b/c` → `5.12b`), `+` lands mid-band (`5.10+` → `5.10c`, matching its code of 3300), `-` at the bottom (`5.14-` → `5.14a`), protection suffixes are stripped (`V7 PG13` → `V7`), and V-scale modifiers drop to the base grade since there is no `V6+` to store. A test asserts nothing is dropped, so a new grade shape shows up as a failure rather than as silent data loss.
+
+> **The fixture is a stub, not a captured export**, so it cannot notice Mountain Project changing their format. If an import ever starts dropping rows, compare a fresh export's header row against `EXPORT_HEADER` in that test file first.
+- Quoted fields are parsed properly — `Notes` and `Location` both contain commas, and a naive `split(",")` shifts every later column.
+
+### Re-importing
+
+**Non-destructive and idempotent.** A day already carrying a note of the category being imported is skipped, so running the same export twice adds nothing and a note written by hand is never clobbered. Verified live against a 724-row export: the first import created 261 notes, the second created 0 and skipped 261. Every planned note is validated against the same `noteSchema("day")` the dialog uses, so an import can never write a note the editor would refuse to display.
+
+---
+
 ## Discuss Your Climbing History
 
 An agentic chat at the foot of `/user/:handle/stats`, where a climber can interrogate their own logbook: trajectory and a realistic next grade, day-of-week form, hardest send this year, cycles in their training.
@@ -769,6 +804,8 @@ The agent starts with **no data in its prompt** — it must call tools to learn 
 | `listSessions` | Real sessions — date, day of week, counts, hardest grade sent, minutes |
 | `gradeProgression` | Month-by-month hardest grade, **best board-adjusted send**, adjusted point total, sends, days climbing |
 | `boardDifficulty` | Every board the climber uses with its multiplier, plus the scale, formula and a worked example |
+| `listNotes` | The climber's own day/week notes in a range — outdoor sessions, strength, diet, sleep — each with a readable summary *and* its raw fields |
+| `notesSummary` | Month-by-month rollup of notes: outdoor days, pitches, hardest outdoor grades, strength days, drinks logged, sleep reports |
 
 Supporting decisions:
 
@@ -777,6 +814,18 @@ Supporting decisions:
 - **Truncation is surfaced.** A range over `MAX_ROWS` (400) comes back with `truncated: true` and a note to narrow it, so the model never treats a partial set as the whole record.
 - **Dates are formatted in Postgres** (`to_char`), not sliced off a UTC ISO string. `tick_sessions.date` is a real `date` column, and a client-side UTC slice landed a day either side of it — the agent quotes these dates back to the climber, so two tools disagreeing about which day a climb happened is a real bug, observed and fixed.
 - Speculation about future grades is explicitly *welcome*, on two conditions: anchored in figures it actually pulled, and labelled as projection rather than record.
+
+### Notes are half the picture
+
+The agent reads the climber's own [Stats Notes](#stats-notes) as well as their ticks, because a logbook of board climbs cannot explain itself:
+
+- **A quiet training month is not automatically detraining.** Outdoor sessions and pitch counts live in the notes, not in the tick data, so the prompt requires checking them before calling a dip a plateau. Verified: asked "my board training looks thin — am I losing fitness?", the agent called `notesSummary` and answered *"No — your board log is thin because there's barely any board history yet… meanwhile you've been consistently outside on rock"*, with a monthly table of outdoor days and pitches.
+- **Outdoor grades are a different scale.** Routes are YDS, boulders are V-scale, and neither belongs in the board's adjusted-points arithmetic. Both note tools say so in a `legend` field.
+- **Cycles usually live in the notes** — sleep reports, drink counts and strength days are what turn "your form dips every third week" from a hunch into an observation.
+- **Correlation is not cause, and the sample is usually small.** The prompt requires labelling which it is. Verified: with one sleep note on record the agent said *"One data point can't establish a pattern; it's a coincidence worth watching, not a finding"* rather than claiming a link.
+- Daily and weekly drink counts are reported **separately**, never summed — a climber who logs both would otherwise be double-counted, and a wrong total is worse than two honest ones.
+
+Both tools are bound to the session's climber like every other one, which matters more here: notes are the only read-protected resource in the app.
 
 ### Board difficulty is part of every comparison
 

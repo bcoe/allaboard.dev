@@ -1217,6 +1217,29 @@ paths:
       security:
         - apiKeyAuth: []
         - cookieAuth: []
+  /api/users/{handle}/import/mountain-project:
+    post:
+      summary: Import outdoor sessions from a Mountain Project CSV export.
+      parameters:
+        - name: handle
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "{ notesCreated, climbingSessions, boulderingSessions, daysInFile, rowsParsed, skipped }."
+        "400":
+          description: the body carries no CSV, it is too large, or its header row is not a Mountain Project export.
+        "401":
+          description: not authenticated.
+        "403":
+          description: authenticated as a different user than handle.
+        "500":
+          description: database error.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
   /api/users/{handle}:
     get:
       summary: Fetch a user's public profile by handle.
