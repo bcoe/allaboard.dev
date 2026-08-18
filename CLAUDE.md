@@ -699,9 +699,10 @@ The agent starts with **no data in its prompt** — it must call tools to learn 
 | Tool | Returns |
 |---|---|
 | `historySummary` | Whole-logbook shape: first/last tick, totals, sends by grade, boards. Cheap; the sensible first call |
-| `listTicks` | Real ticks in a date range — climb, grade, board, angle, sent, attempts, rating, notes |
+| `listTicks` | Real ticks in a date range — climb, grade, board, angle, sent, attempts, rating, notes, **`boardDifficulty`** and **`adjustedPoints`** |
 | `listSessions` | Real sessions — date, day of week, counts, hardest grade sent, minutes |
-| `gradeProgression` | Month-by-month hardest grade / sends / days climbing, pre-aggregated for trajectory questions |
+| `gradeProgression` | Month-by-month hardest grade, **best board-adjusted send**, adjusted point total, sends, days climbing |
+| `boardDifficulty` | Every board the climber uses with its multiplier, plus the scale, formula and a worked example |
 
 Supporting decisions:
 
@@ -710,6 +711,27 @@ Supporting decisions:
 - **Truncation is surfaced.** A range over `MAX_ROWS` (400) comes back with `truncated: true` and a note to narrow it, so the model never treats a partial set as the whole record.
 - **Dates are formatted in Postgres** (`to_char`), not sliced off a UTC ISO string. `tick_sessions.date` is a real `date` column, and a client-side UTC slice landed a day either side of it — the agent quotes these dates back to the climber, so two tools disagreeing about which day a climb happened is a real bug, observed and fixed.
 - Speculation about future grades is explicitly *welcome*, on two conditions: anchored in figures it actually pulled, and labelled as projection rather than record.
+
+### Board difficulty is part of every comparison
+
+A V8 is not a V8. `boards.relative_difficulty` runs **1.00 (easiest) to 2.00 (hardest)**, fitted by per-user logistic regression on real per-attempt send rates controlling for grade (`src/lib/server/boardDifficulty.ts`). Live values put **Moonboard 2016 at 2.00** against **Kilter Board (Original) at 1.00**.
+
+The tools therefore hand the agent a weighted score, not just a grade:
+
+```
+adjustedPoints = ROUND(gradePoints × relative_difficulty)      // +20% when flashed
+gradePoints    = ROUND(10 × 1.3^gradeIndex)                    // grade_base_points()
+```
+
+> **V8 on a 2.00 board = 82 × 2.00 = 164, which beats V10 on a 1.00 board = 138.** Several V8s on a hard board really can outweigh a V9 or V10 on an easy one, and the agent is instructed to say so when the data shows it.
+
+Three decisions worth keeping:
+
+- **One formula, not two.** `ADJUSTED_POINTS_SQL` in `climbingHistoryTools.ts` is the *same* expression the points trigger uses, reusing the `grade_base_points()` SQL helper. Inventing a parallel scale for the agent would let its arithmetic drift from the leaderboard's, and two authorities on "how hard was that" is worse than none.
+- **Trajectory is judged on adjusted figures.** A climber who switches to a harder board sees their raw grades fall while genuinely getting stronger; reading that as a plateau is flatly wrong. `gradeProgression` reports `hardestGradeSent` and `bestAdjustedSend` side by side precisely because when they disagree, the disagreement is the interesting fact.
+- **Projections must name a board.** "A realistic V10" is meaningless on its own; the prompt requires the board, and requires the arithmetic to be shown whenever a reweighting is relied on — a silent reweighting reads as the model making things up.
+
+Verified against a seeded V8-on-Moonboard / V10-on-Kilter pair: the agent called `boardDifficulty`, flipped the ranking, printed `82 × 2.00 = 164` beside `138 × 1.00 = 138`, and expressed its projection as "V9 on the Kilter Board".
 
 ### Model
 
