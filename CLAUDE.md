@@ -726,6 +726,40 @@ Failures are stored via `describeError`, which flattens the AI SDK's status code
 
 ### What gets logged
 
+One record per step, because the job runs where nobody is watching and the interesting failure is a stall rather than an exception. Searchable in Sentry by `session.id`.
+
+| Message | Level | Emitted | Key attributes |
+|---|---|---|---|
+| `Session image job enqueued` | info | producer, on `POST` | `queue.driver`, `messaging.message.id`, `messaging.message.deduped`, `image.attempts` |
+| `Session image job received` | info | consumer, first thing | `messaging.message.retry.count`, `messaging.message.receive.latency`, `image.requested_by` |
+| `Session image job generating` | info | after the ticks load, before the model calls | `job.stage`, `job.elapsed_ms`, `tick_count` |
+| `Session banner art direction written` | info | between the two model calls | `ai.prompt_model`, `ai.prompt_ms`, `ai.prompt_chars` |
+| `Session banner render failed, retrying` | warn | a render attempt failed | `ai.attempt`, `ai.render_ms`, `error.message` |
+| `Session banner generated` | info | pipeline complete | `ai.prompt_ms`, `ai.render_ms`, `image.crop_ms`, `ai.total_ms`, `ai.image_prompt` |
+| `Session image stored` | info | bytes written | `owner`, `image.bytes`, `image.regenerated` |
+| `Session image job skipped` | info | nothing to do | `reason` = `gone` \| `already` \| `no_climbs` |
+| `Session image job failed` | error | the job threw | **`job.stage`**, `job.elapsed_ms`, `error.message` |
+| `Session image job threw` | error | the delivery failed | `job.duration_ms`, `messaging.message.retry.count` |
+| `Session image job finished` | info | delivery succeeded | `job.outcome`, `job.duration_ms` |
+| `Session image job abandoned` | warn | retry budget spent | `messaging.message.retry.count` |
+
+Two details that carry most of the diagnostic weight:
+
+- **`Session image job received` is flushed immediately** (`Sentry.flush`), not left in the buffer. If the function is later killed — a 60s timeout, a freeze — nothing else from that invocation reaches Sentry, and "never delivered" versus "delivered, then stalled" is exactly the distinction the buffer would have swallowed. It is the one log worth paying a round trip for.
+- **`job.stage`** names the step in flight when a job threw: `load_session`, `load_ticks`, `generate`, `store`. An exception message rarely identifies the step on its own — "Invalid JSON response" fits either model call. The stage is deliberately *not* advanced while recording a failure, so a generation failure never reads as a failure to record one.
+
+**Reading a stall.** The last message tells you where it stopped:
+
+| Last log seen | What it means |
+|---|---|
+| `enqueued`, nothing after | never delivered — check the `vercel.json` trigger path and the consumer's invocations |
+| `received`, nothing after | delivered, died before finishing — almost always the function's duration ceiling |
+| `art direction written`, nothing after | the image model is where it hangs (the longest single step) |
+| `render failed, retrying` then nothing | the retry pushed the job past its budget; see `ai.render_ms` |
+
+> **Watch the budget.** A measured end-to-end pipeline is **~41s** against the consumer's `maxDuration = 60`, leaving under 20s of headroom. `renderWithRetry` retries the image call once, which costs roughly another 25s — so a single transient render failure is enough to blow through the ceiling and have the function killed mid-render. `ai.render_ms` and `ai.total_ms` are the numbers to watch; if timeouts show up, the fix is to drop the in-request render retry and let the queue's redelivery do that work instead, rather than raising `maxDuration`.
+
+
 ### ACL
 
 - **Trigger generation** (`POST`): any authenticated user, for any session — a session earns its banner on the first visit by anyone signed in, not only its owner. Sign-in is still required because each call costs real inference and should be attributable to an account.

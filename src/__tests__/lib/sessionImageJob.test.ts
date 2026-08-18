@@ -26,6 +26,7 @@ jest.mock("@/lib/server/tickSessions", () => ({
   loadSessionTicks: jest.fn(),
 }));
 
+import * as Sentry from "@sentry/nextjs";
 import db from "@/lib/server/db";
 import { generateSessionBanner } from "@/lib/server/sessionImage";
 import { loadSessionTicks } from "@/lib/server/tickSessions";
@@ -200,5 +201,83 @@ describe("runSessionImageJob", () => {
       expect.objectContaining({ id: SESSION_ID, tickCount: 2, sentCount: 1, hardestGrade: "V6" }),
       [tick],
     );
+  });
+});
+
+// ── Stage logging ─────────────────────────────────────────────────────────────
+//
+// The job is four slow calls in a row, two of them models, and it runs where
+// nobody is watching. Without a record at each step, a job that is picked up and
+// stalls is indistinguishable from one that was never delivered — which is
+// exactly the hole these logs exist to close.
+
+describe("stage logging", () => {
+  let info: jest.SpyInstance;
+  let error: jest.SpyInstance;
+
+  /** Log messages in the order they were emitted. */
+  const messages = () => info.mock.calls.map((c) => c[0] as string);
+  /** Attributes of the named log line. */
+  const attrs = (spy: jest.SpyInstance, message: string) =>
+    spy.mock.calls.find((c) => c[0] === message)?.[1] as Record<string, unknown> | undefined;
+
+  beforeEach(() => {
+    info = jest.spyOn(Sentry.logger, "info").mockImplementation(() => {});
+    error = jest.spyOn(Sentry.logger, "error").mockImplementation(() => {});
+    jest.spyOn(Sentry, "captureException").mockImplementation(() => "");
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it("records reaching the generate step, before the slow part", async () => {
+    mockGenerate.mockResolvedValue(banner);
+    scene();
+
+    await runSessionImageJob(job());
+
+    expect(messages()).toEqual([
+      "Session image job generating",
+      "Session image stored",
+    ]);
+    expect(attrs(info, "Session image job generating")).toMatchObject({
+      "session.id": SESSION_ID,
+      "job.stage": "generate",
+      tick_count: 1,
+      "job.elapsed_ms": expect.any(Number),
+    });
+  });
+
+  it("names the step that was in flight when a job fails", async () => {
+    mockGenerate.mockRejectedValue(new Error("gateway exploded"));
+    scene();
+
+    await expect(runSessionImageJob(job())).rejects.toThrow();
+
+    expect(attrs(error, "Session image job failed")).toMatchObject({
+      "session.id": SESSION_ID,
+      "job.stage": "generate",
+      "error.message": "gateway exploded",
+      "job.elapsed_ms": expect.any(Number),
+    });
+  });
+
+  it("blames the database, not the model, when the session read fails", async () => {
+    // The stage has to track where execution actually is, or every failure
+    // looks like a generation failure.
+    mockDb.mockImplementation(() => { throw new Error("connection terminated") });
+
+    await expect(runSessionImageJob(job())).rejects.toThrow("connection terminated");
+
+    expect(attrs(error, "Session image job failed")).toMatchObject({
+      "job.stage": "load_session",
+    });
+  });
+
+  it("says nothing about generating when there is nothing to draw", async () => {
+    scene({ ticks: [] });
+
+    await runSessionImageJob(job());
+
+    expect(messages()).toEqual(["Session image job skipped"]);
   });
 });

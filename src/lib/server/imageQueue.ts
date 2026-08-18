@@ -264,10 +264,51 @@ export async function consumeSessionImageJob(
             },
           },
           async (span) => {
-            // startSpan marks the span errored if this throws, which is how the
-            // convention's internal_error status gets set.
-            const outcome = await runSessionImageJob(job);
-            span.setAttribute("job.outcome", outcome);
+            // The first thing a job records, and the one that answers "was this
+            // message ever picked up?". Flushed immediately rather than left in
+            // the buffer: if the function is later killed — a 60s timeout, a
+            // freeze — nothing else in this invocation reaches Sentry, and the
+            // difference between "never delivered" and "delivered, then stalled"
+            // is exactly what that buffer would have swallowed.
+            Sentry.logger.info("Session image job received", {
+              "session.id": job.sessionId,
+              "messaging.message.id": metadata.messageId,
+              "messaging.destination.name": metadata.topicName,
+              "messaging.message.retry.count": Math.max(0, metadata.deliveryCount - 1),
+              "messaging.message.receive.latency": receiveLatency,
+              "image.attempts": job.attempts,
+              "image.regenerated": job.regenerate,
+              "image.requested_by": job.requestedBy,
+            });
+            await Sentry.flush(2000);
+
+            const startedAt = Date.now();
+            try {
+              // startSpan marks the span errored if this throws, which is how the
+              // convention's internal_error status gets set.
+              const outcome = await runSessionImageJob(job);
+              span.setAttribute("job.outcome", outcome);
+
+              Sentry.logger.info("Session image job finished", {
+                "session.id": job.sessionId,
+                "messaging.message.id": metadata.messageId,
+                "job.outcome": outcome,
+                "job.duration_ms": Date.now() - startedAt,
+              });
+            } catch (err) {
+              // The exception itself goes to Sentry from inside the job, where
+              // the stage is known. This is the queue-level counterpart: it says
+              // the delivery failed and how long it burned before doing so,
+              // which is what distinguishes a fast rejection from a timeout.
+              Sentry.logger.error("Session image job threw", {
+                "session.id": job.sessionId,
+                "messaging.message.id": metadata.messageId,
+                "messaging.message.retry.count": Math.max(0, metadata.deliveryCount - 1),
+                "job.duration_ms": Date.now() - startedAt,
+                "error.message": err instanceof Error ? err.message : String(err),
+              });
+              throw err;
+            }
           },
         );
       }),

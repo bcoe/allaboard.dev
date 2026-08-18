@@ -67,75 +67,119 @@ export type JobOutcome =
 export async function runSessionImageJob(job: SessionImageJob): Promise<JobOutcome> {
   const { sessionId, attempts, regenerate } = job;
 
-  const session = await db("tick_sessions").where({ id: sessionId }).first();
-  if (!session) {
-    // The tick_sessions trigger rebuilds sessions on every tick change, so a
-    // slug can genuinely stop existing between enqueue and delivery.
-    Sentry.logger.info("Session image job skipped", {
-      "session.id": sessionId, outcome: "skipped", reason: "gone",
-    });
-    return "gone";
-  }
+  const startedAt = Date.now();
+  const since = () => Date.now() - startedAt;
 
-  // Re-read rather than trusting the producer's decision: with at-least-once
-  // delivery this job may be a redelivery of one that already succeeded.
-  const existing = await db("session_images")
-    .where({ session_id: sessionId })
-    .select("status")
-    .first();
+  /**
+   * The step currently in flight, so a failure can say *where* it died.
+   *
+   * The pipeline is four slow calls in a row (two of them models), and an
+   * exception's message alone rarely identifies which one — "Invalid JSON
+   * response" could be either model. This is what turns that into an answer.
+   */
+  let stage: string = "load_session";
 
-  if (existing?.status === "ready" && !regenerate) {
-    Sentry.logger.info("Session image job skipped", {
-      "session.id": sessionId, outcome: "skipped", reason: "already",
-    });
-    return "already";
-  }
-
-  const ticks = await loadSessionTicks(session);
-  if (ticks.length === 0) {
-    Sentry.logger.info("Session image job skipped", {
-      "session.id": sessionId, outcome: "skipped", reason: "no_climbs",
-    });
-    return "no_climbs";
-  }
-
-  let banner;
   try {
-    banner = await generateSessionBanner(
-      {
-        id:           session.id,
-        tickCount:    session.tick_count,
-        sentCount:    session.sent_count,
-        hardestGrade: session.hardest_grade ?? undefined,
-        totalMinutes: session.total_minutes ?? undefined,
-      },
-      ticks,
-    );
+    const session = await db("tick_sessions").where({ id: sessionId }).first();
+    if (!session) {
+      // The tick_sessions trigger rebuilds sessions on every tick change, so a
+      // slug can genuinely stop existing between enqueue and delivery.
+      Sentry.logger.info("Session image job skipped", {
+        "session.id": sessionId, outcome: "skipped", reason: "gone",
+      });
+      return "gone";
+    }
+
+    // Re-read rather than trusting the producer's decision: with at-least-once
+    // delivery this job may be a redelivery of one that already succeeded.
+    const existing = await db("session_images")
+      .where({ session_id: sessionId })
+      .select("status")
+      .first();
+
+    if (existing?.status === "ready" && !regenerate) {
+      Sentry.logger.info("Session image job skipped", {
+        "session.id": sessionId, outcome: "skipped", reason: "already",
+      });
+      return "already";
+    }
+
+    stage = "load_ticks";
+    const ticks = await loadSessionTicks(session);
+    if (ticks.length === 0) {
+      Sentry.logger.info("Session image job skipped", {
+        "session.id": sessionId, outcome: "skipped", reason: "no_climbs",
+      });
+      return "no_climbs";
+    }
+
+    // Everything decided; from here the job is two model calls and a crop, which
+    // is where the ~40s and every stall live. This is the last cheap checkpoint.
+    Sentry.logger.info("Session image job generating", {
+      "session.id": sessionId,
+      "job.stage": "generate",
+      "job.elapsed_ms": since(),
+      tick_count: ticks.length,
+      "image.attempts": attempts,
+      "image.regenerated": regenerate,
+    });
+
+    stage = "generate";
+    let banner;
+    try {
+      banner = await generateSessionBanner(
+        {
+          id:           session.id,
+          tickCount:    session.tick_count,
+          sentCount:    session.sent_count,
+          hardestGrade: session.hardest_grade ?? undefined,
+          totalMinutes: session.total_minutes ?? undefined,
+        },
+        ticks,
+      );
+    } catch (err) {
+      // The failure is the one thing worth persisting without an image: it holds
+      // the attempt count that bounds retries from later page views, and a reason
+      // that is diagnosable afterwards.
+      // `stage` is deliberately left alone: it still says "generate", which is
+      // where this broke. Advancing it to cover the bookkeeping below would make
+      // every generation failure look like a failure to record one.
+      await recordFailure(sessionId, session.user_id, attempts, describeError(err));
+      Sentry.captureException(err, {
+        tags: { feature: "session_image" },
+        extra: { session_id: sessionId, attempts, stage },
+      });
+      throw err;
+    }
+
+    stage = "store";
+    await storeBanner(sessionId, session.user_id, attempts, banner);
+
+    // Audit event: the actor may not be the session's owner, so record both —
+    // who caused the spend, and whose session it bought a banner for.
+    Sentry.logger.info("Session image stored", {
+      action: existing ? "update" : "create", resource: "session_image",
+      "session.id": sessionId, owner: session.user_id,
+      "image.requested_by": job.requestedBy, "image.regenerated": regenerate,
+      "ai.image_model": banner.model, "image.bytes": banner.bytes.length,
+      "image.attempts": attempts, outcome: "ready",
+    });
+
+    return "ready";
   } catch (err) {
-    // The failure is the one thing worth persisting without an image: it holds
-    // the attempt count that bounds retries from later page views, and a reason
-    // that is diagnosable afterwards.
-    await recordFailure(sessionId, session.user_id, attempts, describeError(err));
-    Sentry.captureException(err, {
-      tags: { feature: "session_image" },
-      extra: { session_id: sessionId, attempts },
+    // Names the step that was in flight. The consumer logs that the delivery
+    // threw and how long it burned; this is the half that says *where*, which
+    // an exception message on its own usually cannot ("Invalid JSON response"
+    // fits either model call).
+    Sentry.logger.error("Session image job failed", {
+      "session.id": sessionId,
+      "job.stage": stage,
+      "job.elapsed_ms": since(),
+      "image.attempts": attempts,
+      "error.message": err instanceof Error ? err.message : String(err),
     });
     throw err;
   }
-
-  await storeBanner(sessionId, session.user_id, attempts, banner);
-
-  // Audit event: the actor may not be the session's owner, so record both —
-  // who caused the spend, and whose session it bought a banner for.
-  Sentry.logger.info("Session image stored", {
-    action: existing ? "update" : "create", resource: "session_image",
-    "session.id": sessionId, owner: session.user_id,
-    "image.requested_by": job.requestedBy, "image.regenerated": regenerate,
-    "ai.image_model": banner.model, "image.bytes": banner.bytes.length,
-    "image.attempts": attempts, outcome: "ready",
-  });
-
-  return "ready";
 }
 
 /**

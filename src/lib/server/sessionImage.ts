@@ -202,6 +202,7 @@ function truncate(s: string): string {
  */
 async function renderWithRetry(prompt: string) {
   for (let attempt = 1; ; attempt++) {
+    const attemptStartedAt = Date.now();
     try {
       const result = await generateImage({
         model: gateway.imageModel(IMAGE_MODEL),
@@ -219,6 +220,9 @@ async function renderWithRetry(prompt: string) {
       Sentry.logger.warn("Session banner render failed, retrying", {
         "ai.image_model": IMAGE_MODEL,
         "ai.attempt": attempt,
+        // How long the failed attempt burned. A retry after a near-full render
+        // is what pushes a job past the consumer's 60s budget.
+        "ai.render_ms": Date.now() - attemptStartedAt,
         // The prompt is the first thing worth seeing on a rejected render —
         // a content refusal is only legible next to what was asked for.
         "ai.image_prompt": forLog(prompt),
@@ -314,18 +318,36 @@ export async function generateSessionBanner(
       attributes: { "session.id": session.id, "ai.image_model": IMAGE_MODEL },
     },
     async () => {
+      const promptStartedAt = Date.now();
       const { text } = await generateText({
         model: gateway(PROMPT_MODEL),
         system: ART_DIRECTION,
         prompt: buildSessionBrief(session, ticks),
         experimental_telemetry: { isEnabled: true, functionId: "session-image.prompt" },
       });
+      const promptMs = Date.now() - promptStartedAt;
 
       const prompt = text.trim();
       if (!prompt) throw new Error(`${PROMPT_MODEL} returned an empty image prompt`);
 
+      // The checkpoint between the two model calls, and the one that localises a
+      // stall: the render below is the longest single step in the app, so
+      // "art direction written" with nothing after it means the image model is
+      // where the job stopped, not the language model.
+      Sentry.logger.info("Session banner art direction written", {
+        "session.id": session.id,
+        "ai.prompt_model": PROMPT_MODEL,
+        "ai.prompt_ms": promptMs,
+        "ai.prompt_chars": prompt.length,
+      });
+
+      const renderStartedAt = Date.now();
       const image = await renderWithRetry(prompt);
+      const renderMs = Date.now() - renderStartedAt;
+
+      const cropStartedAt = Date.now();
       const cropped = await cropToBanner(image.uint8Array);
+      const cropMs = Date.now() - cropStartedAt;
 
       const bytes = cropped?.bytes ?? Buffer.from(image.uint8Array);
       const mimeType = cropped?.mimeType ?? image.mediaType ?? "image/jpeg";
@@ -347,6 +369,12 @@ export async function generateSessionBanner(
         "image.bytes": bytes.length,
         "image.cropped": cropped !== null,
         tick_count: ticks.length,
+        // Where the wall-clock actually went. The consumer's budget is 60s, so
+        // these are what say how close a session runs to being killed.
+        "ai.prompt_ms": promptMs,
+        "ai.render_ms": renderMs,
+        "image.crop_ms": cropMs,
+        "ai.total_ms": promptMs + renderMs + cropMs,
       });
 
       return { prompt, model: IMAGE_MODEL, mimeType, bytes };
