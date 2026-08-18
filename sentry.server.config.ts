@@ -6,7 +6,7 @@ Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
   environment: process.env.NODE_ENV,
 
-  tracesSampleRate: isDev ? 1.0 : 0.2,
+  tracesSampleRate: isDev ? 1.0 : 1.0,
 
   // Turn on Sentry structured logs (Sentry.logger.*).
   enableLogs: true,

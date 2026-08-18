@@ -7,7 +7,7 @@ Sentry.init({
   environment: process.env.NODE_ENV, // "development" | "production"
 
   // Tracing — capture all traces in dev, sample in production
-  tracesSampleRate: isDev ? 1.0 : 0.2,
+  tracesSampleRate: isDev ? 1.0 : 1.0,
 
   integrations: [
     Sentry.browserTracingIntegration(),
