@@ -37,20 +37,28 @@ export type QueueDriver = "vercel" | "memory";
  * How long a queued job stays alive — and therefore how long its dedupe key
  * holds.
  *
- * Vercel ties the `idempotencyKey` deduplication window to the message's
- * lifetime, so retention is really two settings at once. The default (24h)
- * would be wrong here: the automatic key is derived from the session's attempt
- * count, so a job lost *without* recording a failure would leave that count
- * unchanged, every later page view would recompute the same key, and automatic
- * generation would be silently deduped away for a day. Only the corner button
- * (which publishes without a key) could recover it.
+ * Two settings in one, because Vercel ties the `idempotencyKey` deduplication
+ * window to the message's lifetime. It has to cover the *whole* retry story, not
+ * just one attempt: a message is deleted the moment its TTL expires, whatever
+ * state it is in, so a TTL shorter than the retry sequence silently turns the
+ * delivery budget into a single attempt.
  *
- * Five minutes makes that window self-healing instead: long enough that a
- * refresh during a ~40s job still collapses onto it — with room for the one
- * retry the consumer allows — and short enough that a lost job is retried on the
- * next visit rather than a day later.
+ * The arithmetic, worst case:
+ *
+ *     delivery 1   up to 300s   (the consumer's maxDuration)
+ *   + lease wait        180s    (visibilityTimeoutSeconds, if the worker dies)
+ *   + delivery 2   up to 300s
+ *   ------------------------------------------------------------------
+ *   = 780s, plus queue latency  →  900s, with room to spare
+ *
+ * A longer window costs nothing on the deduplication side, despite appearances.
+ * The key is only held while the original message is *alive*, and a live message
+ * is one that is still going to be delivered — so being deduplicated against it
+ * is the correct outcome, not a lost image. Once the message is acknowledged or
+ * expires the key frees with it, and a job that failed for real leaves a `failed`
+ * row, which bumps `attempts` and changes the key anyway.
  */
-const RETENTION_SECONDS = 300;
+const RETENTION_SECONDS = 900;
 
 /**
  * Which driver this process uses.
@@ -266,7 +274,7 @@ export async function consumeSessionImageJob(
           async (span) => {
             // The first thing a job records, and the one that answers "was this
             // message ever picked up?". Flushed immediately rather than left in
-            // the buffer: if the function is later killed — a 60s timeout, a
+            // the buffer: if the function is later killed — the 300s ceiling, a
             // freeze — nothing else in this invocation reaches Sentry, and the
             // difference between "never delivered" and "delivered, then stalled"
             // is exactly what that buffer would have swallowed.

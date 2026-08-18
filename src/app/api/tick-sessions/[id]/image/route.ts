@@ -19,8 +19,9 @@ import { resolveUserId } from "@/lib/server/resolveUserId";
 import { enqueueSessionImage, isGenerating } from "@/lib/server/imageQueue";
 
 /**
- * Only enqueues now — the 60s budget the inline pipeline needed moved to the
- * consumer. Left explicit because the status read still touches the database.
+ * Only enqueues now — the long budget the inline pipeline needed moved to the
+ * consumer (300s there). Left explicit because the status read still touches
+ * the database.
  */
 export const maxDuration = 15;
 

@@ -130,7 +130,7 @@ ABSOLUTELY NO visible text of any kind: no letters, numbers, words, signage, log
 
 OUTPUT
 
-Reply with ONLY the image-generation prompt, as ONE paragraph under 200 words. No preamble, explanation, headings, quotation marks, or commentary.`;
+Write ONE dense, visually specific image-generation prompt of approximately 150–200 words, never exceeding 250 words. Spend the prompt on observable visual details rather than explaining their meaning or connection to the session. Output only the prompt as a single paragraph, with no preamble, headings, quotation marks, explanation, or commentary.`;
 
 /**
  * Renders the session as the plain text handed to the prompt model.
@@ -196,9 +196,10 @@ function truncate(s: string): string {
  * connections), but treats a malformed response body as terminal — and that
  * is exactly the failure seen in practice ("Invalid JSON response" after a
  * full ~22s render). One extra attempt costs a request we were going to lose
- * anyway and keeps the worst case (~50s) inside the route's 60s budget, which
- * is why this does not retry further; a session that fails twice in a row is
- * picked up by the cross-visit retry instead.
+ * anyway and keeps the worst case (~70s) well inside the consumer's 300s
+ * budget, which is why this does not retry further; a session that fails twice
+ * in a row is picked up by the queue's redelivery and then the cross-visit
+ * retry instead.
  */
 async function renderWithRetry(prompt: string) {
   for (let attempt = 1; ; attempt++) {
@@ -220,8 +221,8 @@ async function renderWithRetry(prompt: string) {
       Sentry.logger.warn("Session banner render failed, retrying", {
         "ai.image_model": IMAGE_MODEL,
         "ai.attempt": attempt,
-        // How long the failed attempt burned. A retry after a near-full render
-        // is what pushes a job past the consumer's 60s budget.
+        // How long the failed attempt burned. Worth watching against the
+        // consumer's 300s budget: two near-full renders are the worst case.
         "ai.render_ms": Date.now() - attemptStartedAt,
         // The prompt is the first thing worth seeing on a rejected render —
         // a content refusal is only legible next to what was asked for.
@@ -369,7 +370,7 @@ export async function generateSessionBanner(
         "image.bytes": bytes.length,
         "image.cropped": cropped !== null,
         tick_count: ticks.length,
-        // Where the wall-clock actually went. The consumer's budget is 60s, so
+        // Where the wall-clock actually went. The consumer's budget is 300s, so
         // these are what say how close a session runs to being killed.
         "ai.prompt_ms": promptMs,
         "ai.render_ms": renderMs,

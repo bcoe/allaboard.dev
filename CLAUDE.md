@@ -757,7 +757,26 @@ Two details that carry most of the diagnostic weight:
 | `art direction written`, nothing after | the image model is where it hangs (the longest single step) |
 | `render failed, retrying` then nothing | the retry pushed the job past its budget; see `ai.render_ms` |
 
-> **Watch the budget.** A measured end-to-end pipeline is **~41s** against the consumer's `maxDuration = 60`, leaving under 20s of headroom. `renderWithRetry` retries the image call once, which costs roughly another 25s — so a single transient render failure is enough to blow through the ceiling and have the function killed mid-render. `ai.render_ms` and `ai.total_ms` are the numbers to watch; if timeouts show up, the fix is to drop the in-request render retry and let the queue's redelivery do that work instead, rather than raising `maxDuration`.
+### Timing budgets
+
+Four numbers govern how long a job may take and when it is retried. They interlock, so changing one usually means changing another.
+
+| Setting | Value | Where | Governs |
+|---|---|---|---|
+| `maxDuration` | **300s** (5 min) | `export` in the consumer route | Hard termination of one delivery |
+| `visibilityTimeoutSeconds` | **180s** (3 min) | `handleCallback` options | Lease length — how long after a worker *stops extending* before the message is handed to someone else |
+| `retentionSeconds` | **900s** (15 min) | `send()` in `imageQueue.ts` | Message TTL, and the dedupe window |
+| `retry → afterSeconds` | **10s** | `handleCallback` retry callback | Backoff after an *explicit* failure |
+
+Against a measured **~41s** pipeline (+ ~25s if the render retries), 300s is generous headroom. It is also both the default *and* the maximum on every plan including Hobby, now that fluid compute is on by default — so 5 minutes is as long as a delivery can run without moving to Pro (800s) or the extended-duration beta (1800s).
+
+**Why the visibility timeout is shorter than `maxDuration`.** The SDK re-extends the lease while the handler is alive, so a healthy job is never interrupted by it. What 180s really sets is how long the queue waits after a worker *stops* extending — crashed, frozen, terminated — before redelivering. Shorter than the termination limit means a dead worker's message comes back in three minutes rather than five. The cost: if auto-extension ever lapses on a still-running job, the message can be redelivered alongside the first delivery. That is wasted inference, not corruption, because `runSessionImageJob` is idempotent.
+
+**Why retention has to be the largest.** A message is deleted the moment its TTL expires, *whatever state it is in*. So the TTL has to cover the whole retry sequence — `300s (delivery 1) + 180s (lease wait) + 300s (delivery 2) = 780s` — or the delivery budget quietly collapses to a single attempt. 900s covers it with room for queue latency.
+
+> A long retention does **not** widen the deduplication hole, despite tying the dedupe window to the message lifetime. The key is held only while the original message is alive, and a live message is one that is still going to be delivered — so being deduplicated against it is the correct outcome. Once the message is acknowledged or expires, the key frees with it.
+
+`ai.prompt_ms`, `ai.render_ms` and `ai.total_ms` are the numbers to watch against these budgets.
 
 
 ### ACL
