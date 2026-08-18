@@ -1277,6 +1277,105 @@ paths:
       security:
         - apiKeyAuth: []
         - cookieAuth: []
+  /api/users/{handle}/stats-notes/{id}:
+    delete:
+      summary: Delete one of the climber's own notes.
+      parameters:
+        - name: handle
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: scope
+          in: query
+          required: false
+          description: day or week; the granularity currently being viewed.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: with no body once deleted.
+        "400":
+          description: scope is missing or not a scope.
+        "401":
+          description: not authenticated.
+        "403":
+          description: the caller is not the owner.
+        "404":
+          description: no such note belongs to this climber.
+        "409":
+          description: the note's scope differs from the view it was deleted from.
+        "500":
+          description: database error.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
+  /api/users/{handle}/stats-notes:
+    get:
+      summary: List the climber's own notes.
+      parameters:
+        - name: handle
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          description: start of the period range, inclusive (YYYY-MM-DD). Optional.
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: false
+          description: end of the period range, inclusive (YYYY-MM-DD). Optional.
+          schema:
+            type: string
+        - name: scope
+          in: query
+          required: false
+          description: day or week. Optional; omit to get both, which is what the
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "{ notes: StatsNote[] }, oldest period first."
+        "401":
+          description: not authenticated.
+        "403":
+          description: the caller is not the climber whose notes these are.
+        "500":
+          description: database error.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
+    post:
+      summary: Attach a note to one of the climber's own days or weeks.
+      parameters:
+        - name: handle
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: "{ note } — the stored note."
+        "400":
+          description: the scope, period or category payload is invalid.
+        "401":
+          description: not authenticated.
+        "403":
+          description: the caller is not the owner.
+        "500":
+          description: database error.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
   /api/users:
     get:
       summary: List all users, sorted alphabetically by handle.

@@ -399,7 +399,7 @@ The following schema changes are required before the climbs page is fully implem
 ## Access Control (ACL)
 
 ### Core rule
-All resources (climbs, sessions, log entries, profiles) are **publicly viewable** across allaboard.dev. A resource is a **protected resource** when it has an owner — identified by the `users.id` (handle) of the user who created it.
+All resources (climbs, sessions, log entries, profiles) are **publicly viewable** across allaboard.dev — with one exception, `stats_notes`, which is owner-only on read as well (see **Stats Notes**). A resource is a **protected resource** when it has an owner — identified by the `users.id` (handle) of the user who created it.
 
 **Only the owning user may edit or delete their own protected resources.**
 
@@ -465,6 +465,9 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | GET | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
 | POST | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
 | GET | `/api/tick-sessions/:id/image/raw` | `src/app/api/tick-sessions/[id]/image/raw/route.ts` |
+| GET | `/api/users/:handle/stats-notes` | `src/app/api/users/[handle]/stats-notes/route.ts` — **owner-only, including reads** |
+| POST | `/api/users/:handle/stats-notes` | `src/app/api/users/[handle]/stats-notes/route.ts` |
+| DELETE | `/api/users/:handle/stats-notes/:id` | `src/app/api/users/[handle]/stats-notes/[id]/route.ts` |
 | POST | `/api/chat/climbing-history` | `src/app/api/chat/climbing-history/route.ts` — streaming agent chat; own history only |
 | POST | `/api/queues/session-image` | `src/app/api/queues/session-image/route.ts` — Vercel Queues consumer; private, never called by a browser |
 | GET | `/api/auth/me` | `src/app/api/auth/me/route.ts` |
@@ -557,6 +560,7 @@ curl -H "Cookie: $COOKIE" -H "Origin: http://localhost:3000" \
 | `log_entries` | `POST /api/log-entries` | `session.userId === body.userId` |
 | `boards` | `PATCH /api/boards/[id]` | `session.userId === board.created_by` |
 | `follows` | `POST/DELETE /api/users/[handle]/follow` | `session.userId` must be set (follower is always the caller) |
+| `stats_notes` | `GET/POST /api/users/[handle]/stats-notes`, `DELETE .../stats-notes/[id]` | `session.userId === handle` — **also on GET** |
 | `session_images` | `POST /api/tick-sessions/[id]/image` | any authenticated user (`session.userId` set); ownership only gates `?retry=1` |
 
 ### Important: clean up after testing
@@ -672,6 +676,68 @@ Two independent budgets, deliberately:
 - The `functions` key is a path glob relative to the project root, and **this project uses a `src/` directory**, so it must read `src/app/api/queues/…` rather than the `app/api/queues/…` shown in Vercel's docs. Get that wrong and the consumer is simply never invoked — jobs publish fine and nothing processes them.
 - Topics are **partitioned by deployment ID**: in push mode a message is delivered back to the deployment that published it. Message-schema changes are therefore safe across a rollout — a new deployment only ever consumes its own messages, and the old one drains independently.
 - `/api/queues/*` is exempt from rate limiting in `src/middleware.ts`. Callbacks arrive without a session cookie, so they would land in the shared anonymous IP bucket, and a 429 reads to the queue as a failed delivery and comes back as a retry.
+
+---
+
+## Stats Notes
+
+A strip of small cards above the sends timeline on `/user/:handle/stats` — **one per chart column, aligned to it**. In week view there is a card per week; in day view a card per day. Clicking one opens the editor for *that* period, so the column you are looking at is the period you annotate and there is no separate date picker to fall out of sync with the chart.
+
+Week notes and day notes are **distinct kinds**: a week note describes the whole week, a day note describes that day. The chart's granularity decides which kind you are editing.
+
+| Piece | File |
+|---|---|
+| Vocabulary + zod schemas (shared) | `src/lib/statsNotes.ts` |
+| List / create | `src/app/api/users/[handle]/stats-notes/route.ts` |
+| Delete | `src/app/api/users/[handle]/stats-notes/[id]/route.ts` |
+| Card strip, hover card, dialog | `src/components/StatsNotesRow.tsx` |
+
+### ACL — the one read-protected resource
+
+Everything else in allaboard is publicly viewable. These are not: a note can record how much someone drank last week, so **`GET` is owner-only exactly like the mutations**, and responses are `Cache-Control: no-store`. A resource that guards its writes and leaks its reads would be the failure mode that looks like it followed house style. 401 unauthenticated, 403 for anyone but the owner, on every method.
+
+### Scope, and what is editable where
+
+| View | A card per | Hover shows | Dialog edits |
+|---|---|---|---|
+| Week | week column | that week's own notes **and** the daily notes inside it, in two labelled sections | that week's notes only |
+| Day | day column | that day's notes | that day's notes only |
+
+A week note is not shown on any day card — it belongs to no single day, and switching to Week is how you see it. A day note *is* shown on its week's card, faintly when the week has no notes of its own, so a week card hints at what is inside it.
+
+The week view *displays* daily notes so they can be seen in context but must not delete them — a delete button beside a note you are not in a position to edit is an accident waiting to happen. `DELETE` therefore takes a `scope` query parameter naming the view it was made from and returns **409** when it disagrees with the note's own scope, so the rule survives a hand-rolled request rather than living only in the UI.
+
+### Aligning to the columns
+
+Geometry comes from the chart, not from CSS: `chart.convertToPixel({ xAxisIndex: 0 }, i)` gives each category's centre pixel and the gap between adjacent centres gives the width. ECharts owns the grid margins and the category spacing, so a second implementation of that arithmetic in CSS would drift the moment either changed. It is recomputed in the `onReady` callback, which `EChart` fires on init, **on every resize, and on every option change** — the same hook `drawSundayLines` already used, so the two stay consistent by construction. Until the chart has laid out there is no geometry and no cards are drawn: a card over the wrong column is worse than one not yet there.
+
+The dialog ends with a **Done** button, not only an ✕. Each note is stored the moment "Add note" is pressed, but a close box alone gave no sign of that — closing a dialog normally means discarding — so the footer states that notes are saved as they are added. If the add form holds a half-filled note, that line changes to say it is *not* saved yet: Done deliberately does not store a draft, which is fine, but only if it is said out loud rather than silently dropping typed input.
+
+A week note is always filed against its **Monday**, and a database `CHECK` on `EXTRACT(ISODOW)` enforces it, so one week has exactly one key and cannot be written twice under two member days.
+
+> **The day view is dense.** The default range is 6 months — about **182 day columns** — so a day card is only a few pixels wide, and the strip reads like Google Calendar's all-day row rather than a row of labelled cards. The strip is kept 24px tall so a 4px-wide card is still an easy target, the note count is lettered only where a column is wide enough (week view), and the hover card always names the period so there is no doubt which day is under the cursor.
+
+### Categories
+
+Each category brings its own inputs. The three session categories describe something that happened on a *day*; diet and sleep are the two with genuinely different daily and weekly readings, and their option lists differ per scope.
+
+| Category | Scopes | Data |
+|---|---|---|
+| Outdoor Climbing Session | day | hardest route worked / sent (**YDS**), pitch count |
+| Outdoor Bouldering Session | day | hardest boulder worked / sent (V-scale) |
+| Strength Session | day | lifts (Deadlift, Squat, Overhead Press, Bench Press, Curl) each with max weight; exercises (Pull-up **with optional added weight**, Bent-arm hang, Push-up) |
+| Dietary Notes | day, week | scope-specific flags + a drinks counter (`Drinks today` / `Drinks this week`) |
+| Sleep Notes | day, week | scope-specific flags |
+
+Every grade field is optional, **including on the bouldering session**. The spec marks the route grades optional and leaves the boulder ones bare, but requiring "hardest boulder sent" would make it impossible to log a session where nothing went down — the exact case the route category explicitly allows for. A session with no grades still carries its main claim: the climber was out that day.
+
+### Why the vocabulary is shared, and jsonb
+
+`src/lib/statsNotes.ts` is client-safe and holds the option lists, the zod schemas *and* the one-line summariser. The dialog builds a note from it and the route handler validates against it, so a dropdown can never offer an option the server rejects. Both scope rules are enforced there: the flag lists per scope, **and which categories exist at which scope** — a client-side list is not validation, which a test caught after the server initially accepted an outdoor bouldering session filed against a whole week.
+
+`data` is `jsonb` rather than a wide table of nullable columns: the five categories have genuinely different shapes (two grades and a count; two variable-length lists; flags plus a counter), a note is always read whole for one period to render a card, and the alternative is five tables or a dozen mostly-null columns. Schemaless in the column, validated at the boundary. It is *source* data, not a derived aggregate, so the denormalization policy does not apply.
+
+The chip is loaded with `next/dynamic` — it is owner-only, so a visitor should never download the dialog and its option tables.
 
 ---
 

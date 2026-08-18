@@ -635,6 +635,9 @@ import { useAuth } from "@/lib/auth-context";
  * Keeping it out of the page's import graph means non-owners never download it —
  * and the page's own module stays light enough to import in a test.
  */
+/** Owner-only, so it stays out of a visitor's bundle. */
+const StatsNotesRow = dynamic(() => import("@/components/StatsNotesRow"), { ssr: false });
+
 const ClimbingHistoryChat = dynamic(() => import("@/components/ClimbingHistoryChat"), {
   ssr: false,
   loading: () => <p className="mt-10 text-stone-600 text-sm">Loading…</p>,
@@ -693,6 +696,40 @@ export default function UserStatsPage() {
 
   // useCallback so the function reference is stable — EChart's option-update
   // effect depends on it and would otherwise re-run on every render.
+  /**
+   * Where each timeline column sits, so the note cards can line up with it.
+   *
+   * Taken from the chart rather than recomputed in CSS: ECharts owns the grid
+   * margins and the category spacing, and a second implementation of that
+   * arithmetic would drift the moment either changed. Recomputed on every
+   * `onReady`, which fires on init, on resize and on every option change.
+   */
+  const [noteColumns, setNoteColumns] = useState<{ x: number; width: number }[]>([]);
+  const [notePeriods, setNotePeriods] = useState<string[]>([]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const measureNoteColumns = useCallback(function measureNoteColumns(chart: any) {
+    const dates = heatmapDatesRef.current;
+    if (!dates.length) {
+      setNoteColumns([]);
+      setNotePeriods([]);
+      return;
+    }
+
+    const centres = dates.map(
+      (_, i) => chart.convertToPixel({ xAxisIndex: 0 }, i) as number,
+    );
+    // Column width is the gap between adjacent centres. With a single column
+    // there is no gap to measure, so fall back to the plot area's width.
+    const gap =
+      centres.length > 1
+        ? Math.abs(centres[1] - centres[0])
+        : Math.max(8, chart.getWidth() - 60);
+
+    setNotePeriods(dates);
+    setNoteColumns(centres.map((x) => ({ x, width: gap })));
+  }, []);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const drawSundayLines = useCallback(function drawSundayLines(chart: any) {
     const sundays = heatmapSundaysRef.current;
@@ -739,6 +776,16 @@ export default function UserStatsPage() {
   // Refs are stable; no deps needed.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /**
+   * Everything that has to be recomputed from the chart's own layout: the Sunday
+   * boundary rules, and the geometry the note cards align to.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const onHeatmapReady = useCallback((chart: any) => {
+    drawSundayLines(chart);
+    measureNoteColumns(chart);
+  }, [drawSundayLines, measureNoteColumns]);
+
   const pyramidOption = useMemo(() => buildPyramidOption(pyramidTicks), [pyramidTicks]);
 
   const rowHeight    = isMobile ? 26 : 38;
@@ -782,15 +829,27 @@ export default function UserStatsPage() {
           <section className="mb-10">
             <h2 className="text-orange-400 font-semibold text-lg mb-1">Sends</h2>
             <p className="text-stone-500 text-sm mb-3">More, more!</p>
-            <ChartFilters
-              allBoards={allBoards}
-              filter={heatmapFilter}
-              onChange={setHeatmapFilter}
-              granularity={granularity}
-              onGranularityChange={setGranularity}
-            />
+            <div className="flex flex-wrap items-center gap-3">
+              <ChartFilters
+                allBoards={allBoards}
+                filter={heatmapFilter}
+                onChange={setHeatmapFilter}
+                granularity={granularity}
+                onGranularityChange={setGranularity}
+              />
+            </div>
             <div className="bg-stone-900 border border-stone-700 rounded-xl p-5">
-              <EChart option={heatmapOption} height={heatmapHeight} onReady={drawSundayLines} />
+              {/* One card per column, aligned to it. Private, so it exists only on
+                  your own page; its scope follows the chart's granularity. */}
+              {isOwnStats && (
+                <StatsNotesRow
+                  handle={handle}
+                  scope={granularity}
+                  periods={notePeriods}
+                  columns={noteColumns}
+                />
+              )}
+              <EChart option={heatmapOption} height={heatmapHeight} onReady={onHeatmapReady} />
             </div>
           </section>
 
