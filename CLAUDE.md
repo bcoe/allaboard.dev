@@ -815,6 +815,28 @@ Supporting decisions:
 - **Dates are formatted in Postgres** (`to_char`), not sliced off a UTC ISO string. `tick_sessions.date` is a real `date` column, and a client-side UTC slice landed a day either side of it — the agent quotes these dates back to the climber, so two tools disagreeing about which day a climb happened is a real bug, observed and fixed.
 - Speculation about future grades is explicitly *welcome*, on two conditions: anchored in figures it actually pulled, and labelled as projection rather than record.
 
+### Comparison and advice — two sources, two rules
+
+The agent is a coach, not a read-only report: comparing the climber to others, judging their regimen against known training practice, and recommending changes are all in scope. The prompt keeps that from becoming licence to invent by separating the sources:
+
+| Source | Rule |
+|---|---|
+| **This climber's history** | Tools only — never invented, never estimated |
+| **General knowledge** (training principles, strength standards, typical progressions, recovery, injury patterns) | The model's own knowledge, used freely |
+
+The grounding rule is therefore scoped: *"You start with NO data **about this climber**"*, with an explicit pointer to the comparison section. Without that scoping the rule reads as a ban on knowing anything about training at all, and the agent declines to advise.
+
+Supporting constraints, each guarding a specific failure:
+
+- **Label which is which.** Data, general knowledge and projection must be distinguishable, or the climber cannot judge how much to trust any of them.
+- **Anchor comparisons in figures actually pulled.** Comparing against a benchmark is fine; inventing the climber's side of the comparison is not.
+- **No invented precision or sources.** This is the specific hazard of allowing outside knowledge — confident fabricated statistics and studies. "Training literature generally suggests…" is honest; a named study with invented numbers is not.
+- **Outside numbers vary in quality.** Strength norms (bodyweight-relative lifts) are reasonably well established; climbing grade distributions are soft and self-report-biased, so ranges and "roughly" are required there.
+- **Grades are not comparable across contexts** — a board grade, an outdoor V grade and another gym's grade are three different things.
+- **Health: useful, not reckless.** Flag risk signals visible in the data (volume jumps, no rest, poor sleep beside heavy load) and point at a coach or physio when that is the real answer; no diagnosis, no rehab prescriptions.
+
+Verified live on a two-year history: the agent pulled six tools, tabulated real outdoor volume and grades, then opened its comparative section with *"(this part is general knowledge, not your data — flagging clearly)"* and hedged the benchmark as what climbers at that grade "usually" do — while stating plainly that three board sessions were "too little to call a trend".
+
 ### Notes are half the picture
 
 The agent reads the climber's own [Stats Notes](#stats-notes) as well as their ticks, because a logbook of board climbs cannot explain itself:

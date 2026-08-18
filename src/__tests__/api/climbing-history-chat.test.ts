@@ -144,6 +144,36 @@ describe("POST /api/chat/climbing-history — agent setup", () => {
     expect(system).toMatch(/must come from a tool call/i);
   });
 
+  it("scopes the no-data rule to the climber, not to general knowledge", async () => {
+    // Otherwise "you start with NO data" reads as a ban on knowing anything about
+    // training at all, and the agent refuses to compare or advise.
+    await POST(ask("anything"));
+
+    const system: string = callOpts().system;
+    expect(system).toMatch(/NO data \*\*about this climber\*\*/i);
+    expect(system).toMatch(/General knowledge about training is a separate matter/i);
+  });
+
+  it("permits comparison and advice, on the climber's real figures", async () => {
+    await POST(ask("anything"));
+
+    const system: string = callOpts().system;
+    expect(system).toMatch(/Comparisons and advice/i);
+    // The half that keeps it honest: benchmarks are fine, inventing the climber's
+    // side of the comparison is not.
+    expect(system).toMatch(/Anchor every comparison in figures you actually pulled/i);
+    expect(system).toMatch(/Label which is which/i);
+  });
+
+  it("forbids fabricated statistics and citations", async () => {
+    // The specific hazard of allowing outside knowledge: confident invented numbers.
+    await POST(ask("anything"));
+
+    const system: string = callOpts().system;
+    expect(system).toMatch(/Do not invent precision or sources/i);
+    expect(system).toMatch(/no made-up studies/i);
+  });
+
   it("enables telemetry with a function id and conversation metadata", async () => {
     // Sentry's AI Agents and Conversations views are keyed off these.
     await POST(ask("anything", "conv-42"));
