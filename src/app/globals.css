@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Streamdown renders the chat answers; Tailwind has to scan its utilities. */
+@source "../../node_modules/streamdown/dist/*.js";
+
 :root {
   --background: #0c0a09;
   --foreground: #f5f5f4;
@@ -30,4 +33,83 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-banner-sweep { animation: none; }
+}
+
+/**
+ * Markdown inside the climbing-history chat.
+ *
+ * The agent is asked to answer with tables and named climbs, so tables are the
+ * load-bearing element here rather than a nicety. Scoped to the chat instead of
+ * a global prose style, and deliberately narrow: the theme is stone-on-charcoal
+ * with an orange accent, and Streamdown's defaults assume a light page.
+ */
+.prose-chat > :first-child { margin-top: 0; }
+.prose-chat > :last-child { margin-bottom: 0; }
+
+.prose-chat p,
+.prose-chat ul,
+.prose-chat ol { margin: 0.6rem 0; }
+
+.prose-chat strong { color: #fafaf9; font-weight: 600; }
+.prose-chat em { color: #d6d3d1; }
+
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  color: #fb923c;
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin: 1rem 0 0.4rem;
+}
+
+.prose-chat ul { list-style: disc; padding-left: 1.15rem; }
+.prose-chat ol { list-style: decimal; padding-left: 1.15rem; }
+.prose-chat li { margin: 0.2rem 0; }
+
+/* Wide tables scroll inside the bubble rather than stretching the page. */
+.prose-chat .streamdown-table-wrapper,
+.prose-chat table { display: block; overflow-x: auto; max-width: 100%; }
+
+.prose-chat table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.prose-chat th,
+.prose-chat td {
+  border: 1px solid #44403c;
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+}
+.prose-chat th { background: #292524; color: #fafaf9; font-weight: 600; }
+.prose-chat td { color: #d6d3d1; }
+.prose-chat tbody tr:nth-child(even) td { background: rgba(41, 37, 36, 0.4); }
+
+.prose-chat code {
+  background: #292524;
+  border: 1px solid #44403c;
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.8125rem;
+  color: #fdba74;
+}
+.prose-chat pre {
+  background: #1c1917;
+  border: 1px solid #44403c;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.prose-chat pre code { background: none; border: none; padding: 0; color: #d6d3d1; }
+
+.prose-chat a { color: #fb923c; text-decoration: underline; }
+.prose-chat a:hover { color: #fdba74; }
+
+.prose-chat blockquote {
+  border-left: 2px solid #57534e;
+  padding-left: 0.75rem;
+  color: #a8a29e;
+  margin: 0.6rem 0;
 }

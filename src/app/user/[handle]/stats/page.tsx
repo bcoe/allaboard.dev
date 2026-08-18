@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import type { EChartsOption } from "echarts";
@@ -624,8 +625,28 @@ function computeLongestStreak(ticks: UserTick[]): number {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+import { useAuth } from "@/lib/auth-context";
+
+/**
+ * Loaded on demand, and only for the climber whose page this is.
+ *
+ * The chat pulls in a streaming-markdown renderer and its dependency tree, which
+ * is a lot of JavaScript for a feature most visitors to a stats page can't use.
+ * Keeping it out of the page's import graph means non-owners never download it —
+ * and the page's own module stays light enough to import in a test.
+ */
+const ClimbingHistoryChat = dynamic(() => import("@/components/ClimbingHistoryChat"), {
+  ssr: false,
+  loading: () => <p className="mt-10 text-stone-600 text-sm">Loading…</p>,
+});
+
 export default function UserStatsPage() {
   const { handle } = useParams<{ handle: string }>();
+  const { user } = useAuth();
+  // Discussing a logbook is only offered to the climber whose logbook it is.
+  // The endpoint enforces the same rule — a hidden component is not access
+  // control — but there is no reason to show a chat box that would 401.
+  const isOwnStats = !!user && user.id === handle;
 
   const [ticks, setTicks] = useState<UserTick[]>([]);
   const [isMobile, setIsMobile] = useState(isMobileScreen);
@@ -783,6 +804,8 @@ export default function UserStatsPage() {
           </section>
         </>
       )}
+
+      {isOwnStats && <ClimbingHistoryChat handle={handle} />}
     </div>
   );
 }

@@ -465,6 +465,7 @@ All routes are Next.js Route Handlers served under `/api/*` by the Next.js dev s
 | GET | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
 | POST | `/api/tick-sessions/:id/image` | `src/app/api/tick-sessions/[id]/image/route.ts` |
 | GET | `/api/tick-sessions/:id/image/raw` | `src/app/api/tick-sessions/[id]/image/raw/route.ts` |
+| POST | `/api/chat/climbing-history` | `src/app/api/chat/climbing-history/route.ts` — streaming agent chat; own history only |
 | POST | `/api/queues/session-image` | `src/app/api/queues/session-image/route.ts` — Vercel Queues consumer; private, never called by a browser |
 | GET | `/api/auth/me` | `src/app/api/auth/me/route.ts` |
 | POST | `/api/auth/logout` | `src/app/api/auth/logout/route.ts` |
@@ -671,6 +672,67 @@ Two independent budgets, deliberately:
 - The `functions` key is a path glob relative to the project root, and **this project uses a `src/` directory**, so it must read `src/app/api/queues/…` rather than the `app/api/queues/…` shown in Vercel's docs. Get that wrong and the consumer is simply never invoked — jobs publish fine and nothing processes them.
 - Topics are **partitioned by deployment ID**: in push mode a message is delivered back to the deployment that published it. Message-schema changes are therefore safe across a rollout — a new deployment only ever consumes its own messages, and the old one drains independently.
 - `/api/queues/*` is exempt from rate limiting in `src/middleware.ts`. Callbacks arrive without a session cookie, so they would land in the shared anonymous IP bucket, and a 429 reads to the queue as a failed delivery and comes back as a retry.
+
+---
+
+## Discuss Your Climbing History
+
+An agentic chat at the foot of `/user/:handle/stats`, where a climber can interrogate their own logbook: trajectory and a realistic next grade, day-of-week form, hardest send this year, cycles in their training.
+
+| Piece | File |
+|---|---|
+| Tools (the only source of truth) | `src/lib/server/climbingHistoryTools.ts` |
+| Streaming endpoint | `src/app/api/chat/climbing-history/route.ts` |
+| Chat UI | `src/components/ClimbingHistoryChat.tsx` |
+
+### ACL — own history only
+
+Available **only to an authenticated climber on their own stats page**. Two independent gates:
+
+- The page renders the chat only when `user.id === handle`.
+- The endpoint builds its tools from `resolveUserId(req)`, so **no tool takes a user id**. There is no "whose history" parameter to tamper with, which makes prompt injection structurally unable to reach another climber's data rather than merely discouraged from it. A test asserts no tool schema contains a user/handle/climber field.
+
+### Grounding
+
+The agent starts with **no data in its prompt** — it must call tools to learn anything, which is what stops it inventing climbs:
+
+| Tool | Returns |
+|---|---|
+| `historySummary` | Whole-logbook shape: first/last tick, totals, sends by grade, boards. Cheap; the sensible first call |
+| `listTicks` | Real ticks in a date range — climb, grade, board, angle, sent, attempts, rating, notes |
+| `listSessions` | Real sessions — date, day of week, counts, hardest grade sent, minutes |
+| `gradeProgression` | Month-by-month hardest grade / sends / days climbing, pre-aggregated for trajectory questions |
+
+Supporting decisions:
+
+- **`stopWhen: stepCountIs(8)`** gives the agent room to orient, pull ticks, pull sessions, then answer. A tools-only agent with one step answers from nothing, which is precisely how confident nonsense is produced.
+- **Wide ranges are instructed.** A year of ticks is a corpus; last week's is an anecdote.
+- **Truncation is surfaced.** A range over `MAX_ROWS` (400) comes back with `truncated: true` and a note to narrow it, so the model never treats a partial set as the whole record.
+- **Dates are formatted in Postgres** (`to_char`), not sliced off a UTC ISO string. `tick_sessions.date` is a real `date` column, and a client-side UTC slice landed a day either side of it — the agent quotes these dates back to the climber, so two tools disagreeing about which day a climb happened is a real bug, observed and fixed.
+- Speculation about future grades is explicitly *welcome*, on two conditions: anchored in figures it actually pulled, and labelled as projection rather than record.
+
+### Model
+
+Default **`anthropic/claude-sonnet-5`** (override with `AI_CHAT_MODEL`).
+
+> **Why not GPT-4o?** It is two generations old for agentic tool use and, on this gateway, *more expensive per input token* than both this model and `openai/gpt-5` — so it loses on price and recency simultaneously. `openai/gpt-5.4` is the drop-in if OpenAI is preferred. Sonnet 5 is also already the art-direction model, so the app keeps one language-model vendor.
+
+### Telemetry
+
+Instrumented for Sentry's AI Agents and Conversations views:
+
+- Each tool call opens a **`gen_ai.execute_tool`** span named `execute_tool <name>`, with `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.type` and the serialized input. The AI SDK's own `ai.toolCall` spans do not carry the `gen_ai.*` convention Sentry's module keys off, so without these the calls appear as anonymous work.
+- `experimental_telemetry` sets `isEnabled`, `functionId: "climbing-history-chat"`, `recordInputs`/`recordOutputs`, and `metadata` carrying `gen_ai.conversation.id`, `gen_ai.agent.name` and `user.handle`.
+- **`Sentry.setConversationId()`** is called per turn so multi-turn chats group into one thread under **Explore → Conversations**. The client mints one id per mounted chat (`useId`, not a timestamp — pure, and stable across the re-renders that streaming causes).
+- `sentry.server.config.ts` enables `vercelAIIntegration({ recordInputs: true, recordOutputs: true })`. Node enables the integration by default but records neither prompts nor completions unless asked; here the conversation is the climber's own logbook read back to them, and the Conversations view is only useful if it can show what was said.
+
+A verified trace looks like: `ai.streamText` → 3× `ai.streamText.doStream` (the agentic loop) → 3× `ai.toolCall` → 3× `gen_ai.execute_tool`.
+
+### Why not AI Elements
+
+AI Elements is a shadcn/ui generator, and this project has no shadcn, no Radix and no `cva`. Adopting it would install a second design system beside the hand-rolled Tailwind one and leave the chat looking foreign on its own page. The AI SDK (`useChat`) does the real work; presentation is hand-rolled to match the stone/orange theme. **`streamdown`** — the streaming-markdown renderer AI Elements itself uses — is kept, because rendering tables well is a stated requirement and streaming markdown is genuinely fiddly. It needs `@source "../../node_modules/streamdown/dist/*.js"` in `globals.css` so Tailwind scans its utilities, and `.prose-chat` styles it for the dark theme.
+
+The chat is loaded with `next/dynamic` (`ssr: false`): it pulls a markdown renderer and its dependency tree, which is a lot of JavaScript for a feature only the page's owner can use.
 
 ---
 
@@ -1024,6 +1086,7 @@ Next.js automatically loads these files (in priority order, highest last):
 | `AI_PROMPT_MODEL` | optional | Overrides the art-direction model (default `anthropic/claude-sonnet-5`) |
 | `AI_IMAGE_MODEL` | optional | Overrides the image model (default `openai/gpt-image-2`) |
 | `AI_IMAGE_RENDER_SIZE` | optional | Size requested from the image model before cropping to 1200×400 (default `1536x1024`) |
+| `AI_CHAT_MODEL` | optional | Overrides the climbing-history chat model (default `anthropic/claude-sonnet-5`) |
 | `IMAGE_QUEUE_DRIVER` | optional | `memory` or `vercel`. Overrides the background-job driver; defaults to `vercel` on Vercel and `memory` everywhere else. **Nothing needs setting in production** — the queue SDK authenticates via OIDC automatically |
 
 `SESSION_SECRET` must also be added to Vercel Project → Settings → Environment Variables.

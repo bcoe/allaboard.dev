@@ -140,6 +140,21 @@ paths:
                   description: free-form description.
       security:
         - cookieAuth: []
+  /api/chat/climbing-history:
+    post:
+      summary: Stream an answer about the authenticated climber's own history.
+      responses:
+        "200":
+          description: A streaming UI-message response consumed by useChat.
+        "400":
+          description: the body carries no messages.
+        "401":
+          description: not authenticated.
+        "500":
+          description: the stream could not be started.
+      security:
+        - apiKeyAuth: []
+        - cookieAuth: []
   /api/climbs/{id}/beta-videos:
     post:
       summary: Attach an Instagram video URL to a climb as a beta video.
