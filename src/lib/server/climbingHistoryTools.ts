@@ -477,6 +477,205 @@ export function climbingHistoryTools(userId: string) {
         }),
     }),
     /**
+     * Board ticks aggregated in the database, not in the model's head.
+     *
+     * "Which day of the week do I climb hardest" needs a year of ticks grouped and
+     * compared. Answering that from `listTicks` means pulling hundreds of rows and
+     * tallying them mentally — slow, and exactly the arithmetic a language model
+     * gets quietly wrong. Postgres does the grouping instead, so the numbers are
+     * exact and one call replaces the whole exercise.
+     *
+     * Every figure is board-difficulty weighted, so buckets are comparable even
+     * when they involve different boards.
+     */
+    aggregateTicks: tool({
+      description:
+        "Board-climbing statistics grouped by day of week, month, board or wall angle, " +
+        "computed over months of history in one call. Returns per group: days climbed, " +
+        "ticks, sends, send rate, hardest grade sent, and best/mean board-adjusted " +
+        "points. USE THIS for any 'which day / which board / which angle / which month " +
+        "am I strongest on' question instead of listing ticks and counting them yourself.",
+      inputSchema: z.object({
+        groupBy: z
+          .enum(["day_of_week", "month", "board", "angle"])
+          .describe("The dimension to group by."),
+        months: z
+          .number()
+          .int()
+          .min(1)
+          .max(60)
+          .describe("How many months back from today to include."),
+      }),
+      execute: async ({ groupBy, months }) =>
+        inToolSpan("aggregateTicks", "Board ticks grouped and summarised in SQL", { groupBy, months }, async () => {
+          // Bucket label and sort key per dimension. Both are SQL so the ordering
+          // is the database's, not a re-sort the model has to trust.
+          const dimension: Record<string, { label: string; sort: string }> = {
+            day_of_week: { label: "trim(to_char(t.date, 'Day'))", sort: "extract(isodow from t.date)::int" },
+            month:       { label: "to_char(t.date, 'YYYY-MM')",   sort: "0" },
+            board:       { label: "COALESCE(b.name, '(unknown board)')", sort: "0" },
+            angle:       { label: "COALESCE(c.angle::text, '(unknown)') || '°'", sort: "COALESCE(c.angle, -1)" },
+          };
+          const dim = dimension[groupBy];
+
+          const { rows } = await db.raw(
+            `select ${dim.label} as bucket,
+                    ${dim.sort} as sort_key,
+                    count(distinct to_char(t.date, 'YYYY-MM-DD'))::int as days,
+                    count(*)::int as ticks,
+                    count(*) filter (where t.sent)::int as sends,
+                    max(${ADJUSTED_POINTS_SQL})::int as best_adjusted,
+                    round(avg(${ADJUSTED_POINTS_SQL}) filter (where t.sent))::int as mean_adjusted,
+                    sum(${ADJUSTED_POINTS_SQL})::int as total_adjusted,
+                    (array_agg(c.grade order by grade_base_points(c.grade) desc)
+                       filter (where t.sent))[1] as hardest_sent
+               from ticks t
+               join climbs c on c.id = t.climb_id
+               left join boards b on b.id = c.board_id
+              where t.user_id = ?
+                and t.date >= (now() - (? || ' months')::interval)
+              group by 1, 2
+              order by sort_key, bucket`,
+            [userId, months],
+          );
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const groups = rows.map((r: any) => ({
+            group: r.bucket,
+            daysClimbed: r.days,
+            ticks: r.ticks,
+            sends: r.sends,
+            sendRate: r.ticks ? Math.round((r.sends / r.ticks) * 100) / 100 : 0,
+            hardestGradeSent: r.hardest_sent ?? undefined,
+            bestAdjustedPoints: r.best_adjusted ?? 0,
+            meanAdjustedPointsPerSend: r.mean_adjusted ?? 0,
+            totalAdjustedPoints: r.total_adjusted ?? 0,
+          }));
+
+          const largest = Math.max(0, ...groups.map((g: { daysClimbed: number }) => g.daysClimbed));
+
+          return {
+            groupBy,
+            months,
+            groups,
+            // Stated by the tool rather than left to the reader: with two or three
+            // days in a bucket, the gap between buckets is noise, and "Thursday is
+            // your strongest day" off one Thursday is a made-up finding.
+            sampleSize: {
+              largestGroupDays: largest,
+              sufficientForComparison: largest >= 5 && groups.length > 1,
+              caution:
+                largest >= 5
+                  ? undefined
+                  : "Too few days per group to compare meaningfully — report the figures, but do not name a strongest or weakest group.",
+            },
+            scoring:
+              "adjustedPoints = grade points x board relative_difficulty, so groups " +
+              "involving different boards are directly comparable.",
+          };
+        }),
+    }),
+
+    /**
+     * The same idea for outdoor days, which live in notes rather than ticks.
+     *
+     * For most climbers the board is a fraction of their climbing, so a
+     * day-of-week question answered from board ticks alone can be answered from
+     * almost no data while the real signal sits in the outdoor sessions.
+     */
+    aggregateOutdoorDays: tool({
+      description:
+        "Outdoor session statistics from the climber's notes, grouped by day of week or " +
+        "month: days out, pitches, and hardest route (YDS) and boulder (V-scale) grades " +
+        "sent and worked. Use alongside aggregateTicks for 'which day am I strongest' " +
+        "questions — for most climbers the board is only part of their climbing.",
+      inputSchema: z.object({
+        groupBy: z.enum(["day_of_week", "month"]).describe("The dimension to group by."),
+        months: z
+          .number()
+          .int()
+          .min(1)
+          .max(60)
+          .describe("How many months back from today to include."),
+      }),
+      execute: async ({ groupBy, months }) =>
+        inToolSpan("aggregateOutdoorDays", "Outdoor notes grouped and summarised", { groupBy, months }, async () => {
+          const to = new Date();
+          const from = new Date(to);
+          from.setMonth(from.getMonth() - months);
+          const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+          const notes = (await fetchNotes(userId, iso(from), iso(to), "day")).filter(
+            (n) => n.category === "outdoor_climbing" || n.category === "outdoor_bouldering",
+          );
+
+          const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+          const bucketOf = (period: string) =>
+            groupBy === "month"
+              ? period.slice(0, 7)
+              : DAYS[(new Date(period + "T00:00:00").getDay() + 6) % 7];
+
+          interface Bucket {
+            days: Set<string>;
+            pitches: number;
+            routesSent: (string | undefined)[];
+            routesWorked: (string | undefined)[];
+            bouldersSent: (string | undefined)[];
+          }
+          const buckets = new Map<string, Bucket>();
+
+          for (const n of notes) {
+            const key = bucketOf(n.period);
+            const b =
+              buckets.get(key) ??
+              { days: new Set<string>(), pitches: 0, routesSent: [], routesWorked: [], bouldersSent: [] };
+            b.days.add(n.period);
+            const d = n.data as Record<string, never>;
+            if (n.category === "outdoor_climbing") {
+              b.pitches += Number(d.pitchCount ?? 0);
+              b.routesSent.push(d.hardestRouteSent);
+              b.routesWorked.push(d.hardestRouteWorked);
+            } else {
+              b.bouldersSent.push(d.hardestBoulderSent);
+            }
+            buckets.set(key, b);
+          }
+
+          const ordered = [...buckets.entries()].sort(([a], [b]) =>
+            groupBy === "month" ? a.localeCompare(b) : DAYS.indexOf(a) - DAYS.indexOf(b),
+          );
+
+          const groups = ordered.map(([group, b]) => ({
+            group,
+            daysOut: b.days.size,
+            pitches: b.pitches,
+            hardestRouteSent: hardestOn(b.routesSent, ydsRank),
+            hardestRouteWorked: hardestOn(b.routesWorked, ydsRank),
+            hardestBoulderSent: hardestOn(b.bouldersSent, gradeRank),
+            // The figure to compare days on: how often a day out produced a send.
+            daysWithASend: b.routesSent.filter(Boolean).length + b.bouldersSent.filter(Boolean).length,
+          }));
+
+          const largest = Math.max(0, ...groups.map((g) => g.daysOut));
+
+          return {
+            groupBy,
+            months,
+            groups,
+            sampleSize: {
+              largestGroupDays: largest,
+              sufficientForComparison: largest >= 5 && groups.length > 1,
+              caution:
+                largest >= 5
+                  ? undefined
+                  : "Too few days per group to compare meaningfully — report the figures, but do not name a strongest or weakest group.",
+            },
+            legend: "Route grades are YDS; boulder grades are V-scale. Neither is a board grade.",
+          };
+        }),
+    }),
+
+    /**
      * The climber's own notes — the context the board data cannot supply.
      *
      * Notes are what explain a logbook rather than just describe it: a month of

@@ -261,6 +261,126 @@ describe("board difficulty weighting", () => {
 // what let the agent see the other half — and, like every tool here, they are
 // bound to one climber, since notes are private.
 
+// ── Aggregation ───────────────────────────────────────────────────────────────
+//
+// "Which day do I climb hardest" needs months of history grouped and compared.
+// Doing that from raw ticks means tallying hundreds of rows in the model's head —
+// slow, and the kind of arithmetic it gets quietly wrong. These tools push the
+// grouping into the database and, just as importantly, report how thin each group
+// is so a winner is never named off a single session.
+
+describe("aggregation tools", () => {
+  /** `db.raw` result shape, for the SQL-side aggregate. */
+  const rawRows = (rows: unknown[]) => {
+    mockDb.raw = jest.fn().mockResolvedValue({ rows });
+    return mockDb.raw;
+  };
+
+  it("groups board ticks in SQL rather than returning rows to count", async () => {
+    const raw = rawRows([
+      { bucket: "Tuesday", sort_key: 2, days: 6, ticks: 12, sends: 9, best_adjusted: 138, mean_adjusted: 90, total_adjusted: 810, hardest_sent: "V10" },
+      { bucket: "Thursday", sort_key: 4, days: 7, ticks: 14, sends: 6, best_adjusted: 164, mean_adjusted: 120, total_adjusted: 720, hardest_sent: "V8" },
+    ]);
+
+    const out = await tools().aggregateTicks.execute({ groupBy: "day_of_week", months: 12 });
+
+    // One statement, and it is scoped to this climber.
+    expect(raw).toHaveBeenCalledTimes(1);
+    expect(raw.mock.calls[0][1]).toEqual(["alice", 12]);
+    expect(out.groups[0]).toMatchObject({
+      group: "Tuesday", daysClimbed: 6, sends: 9, sendRate: 0.75,
+      hardestGradeSent: "V10", bestAdjustedPoints: 138,
+    });
+  });
+
+  it("weights groups by board difficulty so they can be compared at all", async () => {
+    const raw = rawRows([]);
+    await tools().aggregateTicks.execute({ groupBy: "board", months: 12 });
+
+    const sql = String(raw.mock.calls[0][0]);
+    expect(sql).toContain("grade_base_points");
+    expect(sql).toContain("relative_difficulty");
+  });
+
+  it("lets the database decide the ordering of weekdays", async () => {
+    // Alphabetical weekdays would read as nonsense; isodow is the real order.
+    const raw = rawRows([]);
+    await tools().aggregateTicks.execute({ groupBy: "day_of_week", months: 12 });
+
+    expect(String(raw.mock.calls[0][0])).toContain("isodow");
+  });
+
+  it("warns when the groups are too thin to compare", async () => {
+    // This climber's actual board history: three sessions on three weekdays. A
+    // "strongest day" here would be invented.
+    rawRows([
+      { bucket: "Tuesday", sort_key: 2, days: 1, ticks: 1, sends: 1, best_adjusted: 22, mean_adjusted: 22, total_adjusted: 22, hardest_sent: "V3" },
+      { bucket: "Thursday", sort_key: 4, days: 1, ticks: 2, sends: 1, best_adjusted: 48, mean_adjusted: 48, total_adjusted: 48, hardest_sent: "V6" },
+    ]);
+
+    const out = await tools().aggregateTicks.execute({ groupBy: "day_of_week", months: 12 });
+
+    expect(out.sampleSize.sufficientForComparison).toBe(false);
+    expect(out.sampleSize.caution).toMatch(/do not name a strongest/i);
+  });
+
+  it("says the sample is sufficient once the groups are big enough", async () => {
+    rawRows([
+      { bucket: "Tuesday", sort_key: 2, days: 9, ticks: 20, sends: 15, best_adjusted: 138, mean_adjusted: 90, total_adjusted: 1350, hardest_sent: "V10" },
+      { bucket: "Friday", sort_key: 5, days: 7, ticks: 15, sends: 10, best_adjusted: 106, mean_adjusted: 80, total_adjusted: 800, hardest_sent: "V9" },
+    ]);
+
+    const out = await tools().aggregateTicks.execute({ groupBy: "day_of_week", months: 12 });
+
+    expect(out.sampleSize.sufficientForComparison).toBe(true);
+    expect(out.sampleSize.caution).toBeUndefined();
+  });
+
+  it("groups outdoor days by weekday, in weekday order", async () => {
+    // Most climbing happens outside the board, so the same question has to be
+    // answerable from the notes.
+    mockDb.mockReturnValue(
+      qb([
+        // 2026-05-04 is a Monday, 2026-05-09 a Saturday.
+        { scope: "day", period: "2026-05-04", category: "outdoor_climbing", data: { pitchCount: 4, hardestRouteSent: "5.11d" } },
+        { scope: "day", period: "2026-05-11", category: "outdoor_climbing", data: { pitchCount: 2, hardestRouteSent: "5.12a" } },
+        { scope: "day", period: "2026-05-09", category: "outdoor_climbing", data: { pitchCount: 6, hardestRouteWorked: "5.13c" } },
+      ]),
+    );
+
+    const out = await tools().aggregateOutdoorDays.execute({ groupBy: "day_of_week", months: 12 });
+
+    expect(out.groups.map((g: { group: string }) => g.group)).toEqual(["Monday", "Saturday"]);
+    const monday = out.groups.find((g: { group: string }) => g.group === "Monday");
+    expect(monday).toMatchObject({
+      daysOut: 2,
+      pitches: 6,
+      // Hardest on the YDS scale across both Mondays.
+      hardestRouteSent: "5.12a",
+      daysWithASend: 2,
+    });
+  });
+
+  it("keeps outdoor grades on their own scales", async () => {
+    mockDb.mockReturnValue(qb([]));
+    const out = await tools().aggregateOutdoorDays.execute({ groupBy: "month", months: 12 });
+
+    expect(out.legend).toMatch(/YDS/);
+    expect(out.legend).toMatch(/Neither is a board grade/i);
+  });
+
+  it("opens gen_ai.execute_tool spans for both aggregates", async () => {
+    rawRows([]);
+    await tools().aggregateTicks.execute({ groupBy: "month", months: 12 });
+    expect(spans[0]).toMatchObject({ op: "gen_ai.execute_tool", name: "execute_tool aggregateTicks" });
+
+    spans.length = 0;
+    mockDb.mockReturnValue(qb([]));
+    await tools().aggregateOutdoorDays.execute({ groupBy: "month", months: 12 });
+    expect(spans[0]).toMatchObject({ op: "gen_ai.execute_tool", name: "execute_tool aggregateOutdoorDays" });
+  });
+});
+
 describe("note tools", () => {
   const noteRow = (over: Record<string, unknown> = {}) => ({
     scope: "day",

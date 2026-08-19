@@ -804,6 +804,8 @@ The agent starts with **no data in its prompt** — it must call tools to learn 
 | `listSessions` | Real sessions — date, day of week, counts, hardest grade sent, minutes |
 | `gradeProgression` | Month-by-month hardest grade, **best board-adjusted send**, adjusted point total, sends, days climbing |
 | `boardDifficulty` | Every board the climber uses with its multiplier, plus the scale, formula and a worked example |
+| `aggregateTicks` | Board stats grouped in SQL by day of week / month / board / angle, board-difficulty weighted, with a sample-size verdict |
+| `aggregateOutdoorDays` | The same for outdoor sessions from notes, by day of week or month |
 | `listNotes` | The climber's own day/week notes in a range — outdoor sessions, strength, diet, sleep — each with a readable summary *and* its raw fields |
 | `notesSummary` | Month-by-month rollup of notes: outdoor days, pitches, hardest outdoor grades, strength days, drinks logged, sleep reports |
 
@@ -814,6 +816,18 @@ Supporting decisions:
 - **Truncation is surfaced.** A range over `MAX_ROWS` (400) comes back with `truncated: true` and a note to narrow it, so the model never treats a partial set as the whole record.
 - **Dates are formatted in Postgres** (`to_char`), not sliced off a UTC ISO string. `tick_sessions.date` is a real `date` column, and a client-side UTC slice landed a day either side of it — the agent quotes these dates back to the climber, so two tools disagreeing about which day a climb happened is a real bug, observed and fixed.
 - Speculation about future grades is explicitly *welcome*, on two conditions: anchored in figures it actually pulled, and labelled as projection rather than record.
+
+### Pattern questions are aggregated in the database
+
+"Which day of the week do I climb hardest" used to mean fetching hundreds of ticks and tallying weekdays in the model's head — slow, and exactly the arithmetic a language model gets quietly wrong. `aggregateTicks` and `aggregateOutdoorDays` group in Postgres instead and return exact figures, so one call replaces the whole exercise.
+
+Three decisions carry the weight:
+
+- **Both sources, every time.** The prompt requires asking about board *and* outdoor for any "my climbing" question. For most climbers the board is a fraction of their week, so a day-of-week answer drawn only from ticks can rest on three sessions while the real signal sits in the notes.
+- **The database decides the ordering.** Weekdays sort by `isodow`, not alphabetically, and the aggregate is board-difficulty weighted so groups involving different boards are comparable at all.
+- **The tool reports its own sample size.** Every result carries `sampleSize` with a `sufficientForComparison` flag and a `caution` string when the largest group has fewer than five days. That moves "is this enough data to have an opinion?" out of the model's judgement and into the data, which is what stops a confident "Thursday is your strongest day" off a single Thursday.
+
+Verified live: asked the question against a history of 4 board ticks and 256 outdoor notes, the agent called both aggregates, returned two correctly-ordered tables in ~16s, and answered *"Not enough board data yet to name a strongest day… the tool itself flags this as too thin to compare"* — then declined to over-read the outdoor data either, since the worked grades were similar across days.
 
 ### Comparison and advice — two sources, two rules
 
